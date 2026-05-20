@@ -14,7 +14,8 @@ const PORT = Number(process.env.PORT) || 3001
 const ALLOWED_ORIGINS = new Set([
   process.env.CLIENT_URL ?? 'http://localhost:5173',
   'capacitor://localhost', // iOS native
-  'http://localhost',      // Android native
+  'http://localhost',      // Android native (http scheme)
+  'https://localhost',     // Android native (https scheme via androidScheme)
 ])
 
 app.use(
