@@ -11,9 +11,19 @@ const PORT = Number(process.env.PORT) || 3001
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
+const ALLOWED_ORIGINS = new Set([
+  process.env.CLIENT_URL ?? 'http://localhost:5173',
+  'capacitor://localhost', // iOS native
+  'http://localhost',      // Android native
+])
+
 app.use(
   cors({
-    origin:         process.env.CLIENT_URL ?? 'http://localhost:5173',
+    origin: (origin, cb) => {
+      // No origin = curl / server-to-server / some native clients
+      if (!origin || ALLOWED_ORIGINS.has(origin)) cb(null, true)
+      else cb(new Error(`CORS: ${origin} not allowed`))
+    },
     credentials:    true,
     methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
