@@ -1,0 +1,107 @@
+version: "3.9"
+
+# ─── ArtBeat — Local development stack ───────────────────────────────────────
+#
+# Services:
+#   db       — PostgreSQL 16 with PostGIS (required)
+#   server   — Express API, runs migrations + optional seed on start
+#   pgadmin  — Database GUI (optional, commented out by default)
+#
+# Quick start:
+#   cp server/.env.example server/.env   # then fill in SUPABASE_* values
+#   docker compose up --build
+#
+# To seed the database on first boot, set SEED_DB=true in server/.env
+# or pass it inline:
+#   SEED_DB=true docker compose up --build
+
+# ─── Named volumes ────────────────────────────────────────────────────────────
+
+volumes:
+  postgres_data:
+  pgadmin_data:
+
+# ─── Networks ─────────────────────────────────────────────────────────────────
+
+networks:
+  artbeat:
+    driver: bridge
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL + PostGIS ───────────────────────────────────────────────────
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: artbeat_db
+    restart: unless-stopped
+    networks: [artbeat]
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER:     artbeat
+      POSTGRES_PASSWORD: artbeat
+      POSTGRES_DB:       artbeat
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Init script — enables PostGIS on first start
+      - ./docker/init-postgis.sql:/docker-entrypoint-initdb.d/init-postgis.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artbeat -d artbeat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── ArtBeat server ─────────────────────────────────────────────────────────
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: artbeat_server
+    restart: unless-stopped
+    networks: [artbeat]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV:                  production
+      PORT:                      3001
+      DATABASE_URL:              postgresql://artbeat:artbeat@db:5432/artbeat?schema=public
+      CLIENT_URL:                ${CLIENT_URL:-http://localhost:5173}
+      SUPABASE_URL:              ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      ADMIN_SECRET:              ${ADMIN_SECRET:-change-me}
+      # Set to "true" to seed the database on first container boot
+      SEED_DB:                   ${SEED_DB:-false}
+    volumes:
+      # Persist the seed-flag so the seed only runs once
+      - ./docker/seed-flag:/app/.seeded
+    # Override CMD with the entrypoint script that runs migrations first
+    command: ["sh", "/app/docker/entrypoint.sh"]
+    # Mount the entrypoint script into the container
+    # (avoids embedding it in the image — easier to iterate locally)
+    volumes:
+      - ./docker/entrypoint.sh:/app/docker/entrypoint.sh:ro
+      - ./docker/seed-flag:/app/.seeded
+
+  # ── pgAdmin (optional) ────────────────────────────────────────────────────
+  # Uncomment to enable the pgAdmin GUI at http://localhost:5050
+  # Default login: admin@artbeat.local / artbeat
+  #
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: artbeat_pgadmin
+  #   restart: unless-stopped
+  #   networks: [artbeat]
+  #   depends_on: [db]
+  #   ports:
+  #     - "5050:80"
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL:    admin@artbeat.local
+  #     PGADMIN_DEFAULT_PASSWORD: artbeat
+  #   volumes:
+  #     - pgadmin_data:/var/lib/pgadmin

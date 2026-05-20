@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Balbo\\\\Desktop\\\\Work\\\\ClaudeProjects\\\\artbeat\\\\client\" -Force)",
+      "Bash(Select-Object -Property Mode, Name)",
+      "PowerShell(Remove-Item -Recurse -Force \"C:\\\\Users\\\\Balbo\\\\Desktop\\\\Work\\\\ClaudeProjects\\\\artbeat\\\\client\\\\android\\\\app\\\\src\\\\main\\\\java\\\\com\" -Confirm:$false)"
+    ]
+  }
+}

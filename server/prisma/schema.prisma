@@ -1,0 +1,137 @@
+// ArtBeat – Prisma Schema
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum VenueType {
+  GALLERY
+  MUSEUM
+  THEATER
+  OUTDOOR
+  OTHER
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// City
+// ─────────────────────────────────────────────────────────────────────────────
+
+model City {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  country   String
+  lat       Float
+  lng       Float
+  zoomLevel Int      @default(13)
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venues Venue[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Venue
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Venue {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  address     String
+  lat         Float
+  lng         Float
+  type        VenueType
+  imageUrl    String?
+  website     String?
+  cityId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  city   City    @relation(fields: [cityId], references: [id])
+  events Event[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Category
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Category {
+  id    String @id @default(uuid())
+  name  String
+  slug  String @unique
+  color String // hex, e.g. "#7C3AED"
+
+  events Event[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Event {
+  id          String    @id @default(uuid())
+  title       String
+  description String
+  startDate   DateTime
+  endDate     DateTime? // null = single-day event; set for ongoing exhibitions
+  imageUrl    String?
+  ticketUrl   String?
+  price       Float?    // null = free
+  categoryId  String
+  venueId     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  category  Category   @relation(fields: [categoryId], references: [id])
+  venue     Venue      @relation(fields: [venueId], references: [id])
+  favorites Favorite[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  name         String?
+  avatarUrl    String?
+  authProvider AuthProvider
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  favorites Favorite[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Favorite
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String
+  eventId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@unique([userId, eventId])
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ArtBeat</string>
+    <string name="title_activity_main">ArtBeat</string>
+    <string name="package_name">io.artbeat.app</string>
+    <string name="custom_url_scheme">io.artbeat.app</string>
+</resources>
