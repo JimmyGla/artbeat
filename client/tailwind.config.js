@@ -23,6 +23,13 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
+      // Tailwind's default scale skips 4.5, so `w-4.5`/`h-4.5` silently
+      // generated no CSS and every icon sized with it rendered at zero — the
+      // Preferences rows looked like they simply had no icons. Defining the
+      // value fixes all of them without touching the markup.
+      spacing: {
+        4.5: '1.125rem',
+      },
     },
   },
   plugins: [],

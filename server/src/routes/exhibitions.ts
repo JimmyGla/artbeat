@@ -14,7 +14,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params
 
   try {
-    const event = await prisma.event.findUnique({
+    const event = await prisma.exhibition.findUnique({
       where: { id },
       include: {
         category: true,
@@ -23,7 +23,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     })
 
     if (!event) {
-      apiError(res, 404, `Event "${id}" not found`)
+      apiError(res, 404, `Exhibition "${id}" not found`)
       return
     }
 

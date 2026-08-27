@@ -3,32 +3,36 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
-import EventCard, { EventCardData } from '../components/EventCard'
-import { useFavorites } from '../context/FavoritesContext'
+import ExhibitionCard, { ExhibitionCardData } from '../components/ExhibitionCard'
+import StatusBarScrim from '../components/StatusBarScrim'
+import SaveButton from '../components/SaveButton'
+import {
+  admissionLabel, dateLabel, closingLabel,
+  venueKindLabel, accentColor, formatLabel,
+  type Admission, type RunKind,
+} from '../lib/format'
 import { useCity } from '../context/CityContext'
-import { API_BASE } from '../lib/api'
+import { API_BASE, shareTarget } from '../lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface EventDetail {
+interface ExhibitionDetail {
   id:          string
   title:       string
   description: string | null
-  startDate:   string
-  endDate:     string | null
-  price:       number | null
+  run:         RunKind
+  format:      string
+  startsOn:    string | null
+  endsOn:      string | null
+  admission:   Admission
+  priceCents:  number | null
   imageUrl:    string | null
   ticketUrl:   string | null
-  category: {
-    id:    string
-    name:  string
-    slug:  string
-    color: string
-  }
+  artForms:    { name: string; slug: string; color: string }[]
   venue: {
     id:         string
     name:       string
-    type:       string
+    kind:       string
     address:    string
     lat:        number
     lng:        number
@@ -40,35 +44,12 @@ interface EventDetail {
 
 const API = API_BASE
 
-const VENUE_TYPE_LABEL: Record<string, string> = {
-  GALLERY: 'Gallery',
-  MUSEUM:  'Museum',
-  THEATER: 'Theatre',
-  OUTDOOR: 'Outdoor',
-  OTHER:   'Space',
-}
-
-const VENUE_TYPE_ICON: Record<string, string> = {
-  GALLERY: '🖼',
-  MUSEUM:  '🏛',
-  THEATER: '🎭',
-  OUTDOOR: '🌿',
-  OTHER:   '📍',
+const VENUE_KIND_ICON: Record<string, string> = {
+  MUSEUM: '🏛', GALLERY: '🖼', HOUSE_MUSEUM: '🏡', ARTIST_RESIDENCY: '🎨',
+  CHURCH: '⛪', HISTORIC_BUILDING: '🏰', FOUNDATION: '◈', THEATER: '🎭', OTHER: '📍',
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', {
-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-  })
-}
-
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-GB', {
-    hour: '2-digit', minute: '2-digit',
-  })
-}
 
 // ─── Leaflet pin icon ─────────────────────────────────────────────────────────
 
@@ -128,9 +109,9 @@ function NotFound({ onBack }: { onBack: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center min-h-[calc(100dvh-4rem)] px-8 text-center bg-gray-50">
       <span className="text-6xl mb-4">🎨</span>
-      <h1 className="text-xl font-bold text-gray-800 mb-2">Event not found</h1>
+      <h1 className="text-xl font-bold text-gray-800 mb-2">Exhibition not found</h1>
       <p className="text-sm text-gray-400 mb-8 max-w-xs">
-        This event may have been removed, or the link is no longer valid.
+        This exhibition may have been removed, or the link is no longer valid.
       </p>
       <button onClick={onBack} className="px-6 py-3 bg-gray-900 text-white font-semibold rounded-xl text-sm">
         Go back
@@ -155,56 +136,54 @@ function Toast({ message, visible }: { message: string; visible: boolean }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function EventDetailPage() {
+export default function ExhibitionDetailPage() {
   const { id }                 = useParams<{ id: string }>()
   const navigate               = useNavigate()
   const location               = useLocation()
   const { citySlug }           = useCity()
-  const { isFavorite, toggle } = useFavorites()
 
-  const [event,       setEvent]       = useState<EventDetail | null>(null)
-  const [moreEvents,  setMoreEvents]  = useState<EventCardData[]>([])
+  const [exhibition,       setExhibition]       = useState<ExhibitionDetail | null>(null)
+  const [moreExhibitions,  setMoreExhibitions]  = useState<ExhibitionCardData[]>([])
   const [loading,     setLoading]     = useState(true)
   const [notFound,    setNotFound]    = useState(false)
   const [toast,       setToast]       = useState('')
   const [toastVisible,setToastVisible]= useState(false)
   const toastTimer                    = useRef<ReturnType<typeof setTimeout>>()
 
-  // ── Fetch event detail ────────────────────────────────────────────────────
+  // ── Fetch exhibition detail ────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return
     setLoading(true)
     setNotFound(false)
 
-    fetch(`${API}/api/events/${id}`)
+    fetch(`${API}/api/exhibitions/${id}`)
       .then((r) => {
         if (r.status === 404) { setNotFound(true); return null }
         if (!r.ok) throw new Error('Server error')
         return r.json()
       })
-      .then((data: EventDetail | null) => { if (data) setEvent(data) })
+      .then((data: ExhibitionDetail | null) => { if (data) setExhibition(data) })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false))
   }, [id])
 
   // ── Fetch "more at this venue" ────────────────────────────────────────────
   useEffect(() => {
-    if (!event || !citySlug) return
+    if (!exhibition || !citySlug) return
 
-    fetch(`${API}/api/cities/${citySlug}/events`)
+    fetch(`${API}/api/cities/${citySlug}/exhibitions`)
       .then((r) => r.json())
-      .then((all: (EventCardData & { venue: { id?: string; name: string; type: string } })[]) => {
-        const now  = new Date()
+      .then((all: ExhibitionCardData[]) => {
+        // The API already excludes finished runs, so no date filtering here —
+        // it would also wrongly drop permanent collections, which have no
+        // start date to compare.
         const more = all.filter(
-          (e) =>
-            e.id !== event.id &&
-            e.venue.name === event.venue.name &&
-            new Date(e.startDate) >= now,
+          (e) => e.id !== exhibition.id && e.venue.name === exhibition.venue.name,
         )
-        setMoreEvents(more)
+        setMoreExhibitions(more)
       })
       .catch(console.error)
-  }, [event, citySlug])
+  }, [exhibition, citySlug])
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -215,53 +194,58 @@ export default function EventDetailPage() {
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200)
   }, [])
 
-  const handleSave = useCallback(() => {
-    if (!event) return
-    const wasFavorited = isFavorite(event.id)
-    const toggled = toggle(
-      event.id,
-      // If not logged in: redirect to /login instead of the generic toast
-      () => navigate(`/login?redirect=${encodeURIComponent(location.pathname)}`),
-    )
-    if (toggled) {
-      showToast(wasFavorited ? 'Removed from saved' : 'Saved!')
-    }
-  }, [event, isFavorite, toggle, navigate, location.pathname, showToast])
+  // SaveButton performs the toggle; this only reports it. Wording follows the
+  // verb, because "Saved" would blur the two meanings back together.
+  const handleSaveToast = useCallback((nowSaved: boolean, verb: 'heart' | 'bookmark') => {
+    const heart = verb === 'heart'
+    showToast(nowSaved
+      ? (heart ? 'Added to your places'     : 'Saved to see before it closes')
+      : (heart ? 'Removed from your places' : 'Removed from your list'))
+  }, [showToast])
 
   const handleShare = useCallback(async () => {
-    const url   = window.location.href
-    const title = event?.title ?? 'ArtBeat event'
+    if (!exhibition) return
+    const title = exhibition.title
+
+    // Never share window.location.href: in the WebView that is
+    // capacitor://localhost/... and useless to the recipient.
+    const url = shareTarget(exhibition.id, exhibition.ticketUrl)
+    if (!url) {
+      showToast('Nothing to share for this one yet')
+      return
+    }
 
     if (navigator.share) {
       try { await navigator.share({ title, url }) } catch { /* dismissed */ }
     } else {
       await navigator.clipboard.writeText(url)
-      showToast('Link copied!')
+      showToast('Link copied')
     }
-  }, [event, showToast])
+  }, [exhibition, showToast])
 
   // ── Render guard ──────────────────────────────────────────────────────────
   if (loading) return <Skeleton />
-  if (notFound || !event) return <NotFound onBack={() => navigate(-1)} />
+  if (notFound || !exhibition) return <NotFound onBack={() => navigate(-1)} />
 
-  const saved         = isFavorite(event.id)
-  const isFree        = event.price === null
-  const venueIcon     = VENUE_TYPE_ICON[event.venue.type]  ?? '📍'
-  const venueLabel    = VENUE_TYPE_LABEL[event.venue.type] ?? event.venue.type
-  const venuePin      = makePin(event.category.color)
-  const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${event.venue.lat},${event.venue.lng}`
+  const accent        = accentColor(exhibition.artForms)
+  const venueIcon     = VENUE_KIND_ICON[exhibition.venue.kind]  ?? '📍'
+  const venueLabel    = venueKindLabel(exhibition.venue.kind)
+  const venuePin      = makePin(accent)
+  const closing       = closingLabel(exhibition.endsOn)
+  const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${exhibition.venue.lat},${exhibition.venue.lng}`
 
   return (
     <>
       <Toast message={toast} visible={toastVisible} />
+      <StatusBarScrim className="bg-white" />
 
-      <div className="bg-white min-h-[calc(100dvh-4rem)] overflow-y-auto">
+      <div className="bg-white min-h-dvh overflow-y-auto pb-[calc(var(--nav-h)+1.5rem)]">
 
         {/* ── HERO ────────────────────────────────────────────────────── */}
         <div className="relative w-full shrink-0" style={{ paddingTop: '56.25%' }}>
           <button
             onClick={() => navigate(-1)}
-            className="absolute top-3 left-3 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-sm text-white"
+            className="absolute top-[calc(0.75rem+env(safe-area-inset-top,0px))] left-3 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-sm text-white"
             aria-label="Go back"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
@@ -271,8 +255,8 @@ export default function EventDetailPage() {
 
           <button
             onClick={handleShare}
-            className="absolute top-3 right-3 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-sm text-white"
-            aria-label="Share event"
+            className="absolute top-[calc(0.75rem+env(safe-area-inset-top,0px))] right-3 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-sm text-white"
+            aria-label="Share exhibition"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <circle cx="18" cy="5"  r="3" />
@@ -283,17 +267,17 @@ export default function EventDetailPage() {
             </svg>
           </button>
 
-          {event.imageUrl ? (
+          {exhibition.imageUrl ? (
             <img
-              src={event.imageUrl}
-              alt={event.title}
+              src={exhibition.imageUrl}
+              alt={exhibition.title}
               loading="lazy"
               className="absolute inset-0 w-full h-full object-cover"
             />
           ) : (
             <div
               className="absolute inset-0 flex items-center justify-center"
-              style={{ background: `linear-gradient(135deg, ${event.category.color}33 0%, ${event.category.color}66 100%)` }}
+              style={{ background: `linear-gradient(135deg, ${accent}33 0%, ${accent}66 100%)` }}
             >
               <span className="text-8xl opacity-50 select-none">🎨</span>
             </div>
@@ -307,11 +291,11 @@ export default function EventDetailPage() {
           <div>
             <span
               className="inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full mb-2"
-              style={{ backgroundColor: event.category.color + '1A', color: event.category.color }}
+              style={{ backgroundColor: accent + '1A', color: accent }}
             >
-              {event.category.name}
+              {exhibition.artForms[0]?.name ?? formatLabel(exhibition.format)}
             </span>
-            <h1 className="text-2xl font-bold text-gray-900 leading-tight">{event.title}</h1>
+            <h1 className="text-2xl font-bold text-gray-900 leading-tight">{exhibition.title}</h1>
           </div>
 
           {/* Key info row */}
@@ -324,26 +308,25 @@ export default function EventDetailPage() {
                 <line x1="3"  y1="10" x2="21" y2="10" />
               </svg>
               <span className="font-medium">
-                {fmtDate(event.startDate)}
-                {event.endDate && event.endDate !== event.startDate
-                  ? ` – ${fmtDate(event.endDate)}`
-                  : ` · ${fmtTime(event.startDate)}`}
+                {dateLabel({ run: exhibition.run, startsOn: exhibition.startsOn, endsOn: exhibition.endsOn })}
+                {closing && <span className="ml-2 font-semibold text-amber-600">{closing}</span>}
               </span>
             </div>
 
+            {/* Three states, not two: an unlisted price is not free entry. */}
             <div className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold ${
-              isFree ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-700'
+              exhibition.admission === 'FREE'
+                ? 'bg-emerald-50 text-emerald-700'
+                : exhibition.admission === 'UNKNOWN'
+                  ? 'bg-gray-50 text-gray-400 font-medium'
+                  : 'bg-gray-50 text-gray-700'
             }`}>
-              {isFree ? (
-                <>
-                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Free entry
-                </>
-              ) : (
-                <><span className="text-gray-400 font-normal">€</span>{event.price}</>
+              {exhibition.admission === 'FREE' && (
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
               )}
+              {admissionLabel(exhibition.admission, exhibition.priceCents)}
             </div>
 
             <div className="flex items-center gap-1.5 bg-gray-50 rounded-xl px-3 py-2 text-sm text-gray-700">
@@ -354,29 +337,17 @@ export default function EventDetailPage() {
 
           {/* Save + CTA */}
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleSave}
-              aria-label={saved ? 'Remove from saved' : 'Save event'}
-              className={`w-12 h-12 shrink-0 flex items-center justify-center rounded-xl border-2 transition-all active:scale-95 ${
-                saved ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200 hover:border-red-200'
-              }`}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="w-5 h-5 transition-colors"
-                fill={saved ? '#EF4444' : 'none'}
-                stroke={saved ? '#EF4444' : '#6B7280'}
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-              </svg>
-            </button>
+            {/* Heart or bookmark, decided by the run — see SaveButton. */}
+            <SaveButton
+              target={{ kind: 'exhibition', id: exhibition.id, run: exhibition.run }}
+              variant="plain"
+              onUnauthenticated={() => navigate(`/login?redirect=${encodeURIComponent(location.pathname)}`)}
+              onToggled={handleSaveToast}
+            />
 
-            {event.ticketUrl ? (
+            {exhibition.ticketUrl ? (
               <a
-                href={event.ticketUrl}
+                href={exhibition.ticketUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="flex-1 h-12 flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-xl text-sm transition-colors active:scale-[0.98]"
@@ -399,10 +370,10 @@ export default function EventDetailPage() {
           <div className="border-t border-gray-100" />
 
           {/* Description */}
-          {event.description && (
+          {exhibition.description && (
             <div>
               <h2 className="text-base font-bold text-gray-900 mb-2">About</h2>
-              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{event.description}</p>
+              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{exhibition.description}</p>
             </div>
           )}
 
@@ -415,20 +386,20 @@ export default function EventDetailPage() {
             <div className="flex items-start gap-3 mb-3">
               <div
                 className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center text-lg"
-                style={{ background: event.category.color + '1A' }}
+                style={{ background: accent + '1A' }}
               >
                 {venueIcon}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-900 text-sm">{event.venue.name}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{venueLabel} · {event.venue.address}</p>
+                <p className="font-semibold text-gray-900 text-sm">{exhibition.venue.name}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{venueLabel} · {exhibition.venue.address}</p>
               </div>
             </div>
 
             {/* Mini non-interactive map */}
             <div className="rounded-2xl overflow-hidden border border-gray-100 mb-3" style={{ height: 200 }}>
               <MapContainer
-                center={[event.venue.lat, event.venue.lng]}
+                center={[exhibition.venue.lat, exhibition.venue.lng]}
                 zoom={15}
                 style={{ height: '100%', width: '100%', zIndex: 0 }}
                 zoomControl={false}
@@ -440,7 +411,7 @@ export default function EventDetailPage() {
                 keyboard={false}
               >
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <Marker position={[event.venue.lat, event.venue.lng]} icon={venuePin} />
+                <Marker position={[exhibition.venue.lat, exhibition.venue.lng]} icon={venuePin} />
               </MapContainer>
             </div>
 
@@ -457,9 +428,9 @@ export default function EventDetailPage() {
                 Get directions
               </a>
 
-              {event.venue.websiteUrl && (
+              {exhibition.venue.websiteUrl && (
                 <a
-                  href={event.venue.websiteUrl}
+                  href={exhibition.venue.websiteUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="flex-1 h-10 flex items-center justify-center gap-1.5 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
@@ -476,14 +447,14 @@ export default function EventDetailPage() {
           </div>
 
           {/* More at this venue */}
-          {moreEvents.length > 0 && (
+          {moreExhibitions.length > 0 && (
             <>
               <div className="border-t border-gray-100" />
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-base font-bold text-gray-900">More at {event.venue.name}</h2>
+                  <h2 className="text-base font-bold text-gray-900">More at {exhibition.venue.name}</h2>
                   <span className="text-xs font-semibold text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full">
-                    {moreEvents.length}
+                    {moreExhibitions.length}
                   </span>
                 </div>
 
@@ -492,9 +463,9 @@ export default function EventDetailPage() {
                     className="flex gap-3 overflow-x-auto pb-2"
                     style={{ scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch' }}
                   >
-                    {moreEvents.map((e) => (
+                    {moreExhibitions.map((e) => (
                       <div key={e.id} className="shrink-0 w-44" style={{ scrollSnapAlign: 'start' }}>
-                        <EventCard event={e} />
+                        <ExhibitionCard exhibition={e} />
                       </div>
                     ))}
                   </div>

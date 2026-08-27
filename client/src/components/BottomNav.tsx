@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
+import { Keyboard } from '@capacitor/keyboard'
 
 // ─── SVG icon primitives ─────────────────────────────────────────────────────
 
@@ -119,25 +121,29 @@ const NAV_ITEMS: NavItem[] = [
 
 // ─── Component ────────────────────────────────────────────────────────────────
 //
-// Hide the nav when any page fires `window.dispatchEvent(new CustomEvent('nav:hide'))`
-// and show it again on `nav:show`.  Pages with their own scroll containers
-// (Discover, Favorites) dispatch these events from their scroll handlers.
-// The nav re-appears automatically on route change.
+// The nav is permanently visible while browsing — it does not hide on scroll.
+//
+// The one exception is an open keyboard.  `Keyboard.setResizeMode('native')`
+// shrinks the WebView to the space above the keyboard, so a `fixed bottom-0`
+// bar re-anchors itself directly over the form it is sitting on (it covered
+// the Sign in button).  Native apps drop the tab bar while typing; do the same.
 
 const BottomNav = () => {
-  const [visible, setVisible] = useState(true)
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
 
   useEffect(() => {
-    const hide = () => setVisible(false)
-    const show = () => setVisible(true)
+    if (!Capacitor.isNativePlatform()) return
 
-    window.addEventListener('nav:hide', hide)
-    window.addEventListener('nav:show', show)
+    const shown  = Keyboard.addListener('keyboardWillShow', () => setKeyboardOpen(true))
+    const hidden = Keyboard.addListener('keyboardWillHide', () => setKeyboardOpen(false))
+
     return () => {
-      window.removeEventListener('nav:hide', hide)
-      window.removeEventListener('nav:show', show)
+      void shown.then((l) => l.remove())
+      void hidden.then((l) => l.remove())
     }
   }, [])
+
+  if (keyboardOpen) return null
 
   return (
     <nav
@@ -145,11 +151,10 @@ const BottomNav = () => {
         'fixed bottom-0 left-0 right-0 z-50',
         'bg-white border-t border-gray-200',
         'flex items-stretch',
-        'h-16',
+        'min-h-[4rem]',
+        'pt-2',
         'pb-[env(safe-area-inset-bottom,0px)]',
         'shadow-[0_-1px_8px_rgba(0,0,0,0.06)]',
-        'transition-transform duration-300 ease-in-out',
-        visible ? 'translate-y-0' : 'translate-y-full',
       ].join(' ')}
       aria-label="Main navigation"
     >
@@ -158,8 +163,7 @@ const BottomNav = () => {
           key={to}
           to={to}
           end={end}
-          onClick={() => setVisible(true)} // always show on nav tap
-          className={({ isActive }) =>
+className={({ isActive }) =>
             [
               'flex flex-1 flex-col items-center justify-center gap-0.5',
               'min-h-[44px]', // WCAG 2.5.5 — minimum 44×44 px tap target

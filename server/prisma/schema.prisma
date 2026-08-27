@@ -2,7 +2,8 @@
 // Docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "windows", "darwin-arm64"]
 }
 
 datasource db {
@@ -14,12 +15,60 @@ datasource db {
 // Enums
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Deprecated — superseded by VenueKind. Dropped once `Venue.type` is removed.
 enum VenueType {
   GALLERY
   MUSEUM
   THEATER
   OUTDOOR
   OTHER
+}
+
+/// The eight kinds of place that actually host art in Milan, plus THEATER.
+/// THEATER is not in the original list, but the app models PERFORMANCE events
+/// and the scraper's venue allowlist already classifies Teatro alla Scala —
+/// filing it under OTHER would throw that away. OUTDOOR was dropped: nothing
+/// used it, and public spaces fit OTHER.
+enum VenueKind {
+  MUSEUM
+  GALLERY
+  HOUSE_MUSEUM
+  ARTIST_RESIDENCY
+  CHURCH
+  HISTORIC_BUILDING
+  FOUNDATION
+  THEATER
+  OTHER
+}
+
+/// Whether something is always on, or runs for a period.
+///
+/// Stated outright rather than inferred from a null end date. That inference
+/// was indistinguishable from a failed date parse, which is what made every
+/// venue report zero events.
+enum RunKind {
+  PERMANENT
+  TEMPORARY
+}
+
+/// How you encounter the thing — deliberately separate from what it is made
+/// of (see ArtForm). "Performance" is legitimately both, which is why the old
+/// single `Category` could not express either cleanly.
+enum ExhibitionFormat {
+  EXHIBITION
+  OPENING
+  PERFORMANCE
+  WORKSHOP
+  TALK
+  SCREENING
+}
+
+/// Free and "we could not read a price" are different facts. Collapsing both
+/// into `price = null` meant unparseable prices were advertised as free.
+enum Admission {
+  FREE
+  PAID
+  UNKNOWN
 }
 
 enum AuthProvider {
@@ -40,6 +89,12 @@ model City {
   lng       Float
   zoomLevel Int      @default(13)
   isActive  Boolean  @default(false)
+
+  /// IANA zone of the *sources*, not of whatever machine runs the scraper.
+  /// Italian listings mean Italian calendar days; parsing them on a UTC
+  /// container shifted every date by a day. Per-city so it survives Rome.
+  timezone  String   @default("Europe/Rome")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -57,15 +112,77 @@ model Venue {
   address     String
   lat         Float
   lng         Float
+
+  /// Deprecated — read `kind`. Kept for one release so nothing breaks mid-deploy.
   type        VenueType
+  kind        VenueKind @default(OTHER)
+
   imageUrl    String?
   website     String?
   cityId      String
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  city   City    @relation(fields: [cityId], references: [id])
-  events Event[]
+  /// True when we could not establish a real, geocoded location for this
+  /// venue — either the source never named one, or geocoding failed. Such
+  /// venues carry the city-centre coordinates as a placeholder, so they must
+  /// NOT be drawn on the map: a pin in the wrong place is worse than no pin.
+  /// Their events still appear in list views.
+  isPlaceholder Boolean @default(false)
+
+  /// Where the opening hours came from, and when we last confirmed them.
+  /// Hours are the one field a user acts on physically — a wrong "Open now"
+  /// sends someone to a locked door — so provenance is stored, never guessed,
+  /// and a venue with no source simply shows no hours.
+  hoursSourceUrl String?
+  hoursCheckedAt DateTime?
+
+  city      City       @relation(fields: [cityId], references: [id])
+  exhibitions Exhibition[]
+  favorites   Favorite[]
+  openingHours OpeningHours[]
+  closures     VenueClosure[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OpeningHours — the regular weekly pattern.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model OpeningHours {
+  id      String @id @default(uuid())
+  venueId String
+
+  /// 0 = Sunday … 6 = Saturday, matching JS `Date.getDay()` so no mapping
+  /// layer can get it backwards.
+  weekday Int
+
+  /// Minutes from local midnight, in the *city's* timezone. Stored as integers
+  /// rather than "HH:MM" strings so they compare directly and cannot be
+  /// malformed; formatting for display is the client's job.
+  opensAt  Int
+  closesAt Int
+
+  venue Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  /// Several rows per weekday are legitimate and expected: Italian museums
+  /// commonly close over lunch, which is two ranges on one day.
+  @@index([venueId, weekday])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VenueClosure — exceptions that override the weekly pattern.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model VenueClosure {
+  id      String   @id @default(uuid())
+  venueId String
+  /// A calendar day in the city's timezone, so DATE and never a timestamp.
+  date    DateTime @db.Date
+  note    String?
+
+  venue Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([venueId, date])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,30 +195,117 @@ model Category {
   slug  String @unique
   color String // hex, e.g. "#7C3AED"
 
-  events Event[]
+  exhibitions Exhibition[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event
+// Exhibition
+//
+// Renamed from `Event`: a six-month show is not an event, and a permanent
+// collection certainly is not — the old name pushed everyone toward
+// date-shaped thinking about things that are not points in time.
+//
+// The table, its columns, its indexes and its constraints are all renamed to
+// match, by a hand-written migration using ALTER ... RENAME — instant and
+// lossless in Postgres. A half-rename (model only, table still "Event") left
+// the codebase speaking two vocabularies, which is worse than either end.
 // ─────────────────────────────────────────────────────────────────────────────
 
-model Event {
-  id          String    @id @default(uuid())
+model Exhibition {
+  id          String @id @default(uuid())
   title       String
-  description String
-  startDate   DateTime
-  endDate     DateTime? // null = single-day event; set for ongoing exhibitions
-  imageUrl    String?
-  ticketUrl   String?
-  price       Float?    // null = free
-  categoryId  String
-  venueId     String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
 
-  category  Category   @relation(fields: [categoryId], references: [id])
-  venue     Venue      @relation(fields: [venueId], references: [id])
+  /// Empty when no source offered real prose. Better an honest gap than a
+  /// paragraph repeating the title, which is what 92% of rows contained.
+  description String @default("")
+
+  run    RunKind     @default(TEMPORARY)
+  format ExhibitionFormat @default(EXHIBITION)
+
+  /// DATE, not TIMESTAMP: a calendar day has no time and no timezone, so it
+  /// cannot drift with the host's offset. Nullable because a PERMANENT run has
+  /// no dates at all — enforced by a CHECK constraint added in the migration.
+  /// Columns keep their original names so no data moves.
+  startsOn DateTime? @db.Date @map("startDate")
+  endsOn   DateTime? @db.Date @map("endDate")
+
+  /// An OPENING points at the exhibition it opens. A vernissage is not a
+  /// sibling of its show.
+  parentId String?
+
+  admission  Admission @default(UNKNOWN)
+  /// Integer cents. Floats and money do not mix.
+  priceCents Int?
+
+  imageUrl  String?
+  ticketUrl String?
+
+  /// Stable identity for idempotent upserts. Matching on title + day inserted
+  /// a duplicate whenever a source reworded a heading.
+  sourceUrl  String?   @unique
+  sourceName String?
+  /// Bumped by every scrape that still finds this.
+  lastSeenAt DateTime?
+
+  /// Consecutive runs in which a *healthy* source stopped listing this.
+  /// Gated on source health on purpose: an exhibition missing because the
+  /// scraper found zero links proves nothing, so absence only counts when the
+  /// source itself was working.
+  missedRuns Int @default(0)
+
+  /// Set once a healthy source has stopped listing this repeatedly — the show
+  /// was pulled or cancelled. Excluded from listings, kept for history rather
+  /// than deleted, because the alternative is losing data to a scraper bug.
+  withdrawnAt DateTime?
+
+  /// Deprecated — read `format`. Dropped next release.
+  price      Float?
+  categoryId String?
+
+  venueId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category  Category?      @relation(fields: [categoryId], references: [id])
+  venue     Venue          @relation(fields: [venueId], references: [id])
+  parent    Exhibition?    @relation("Openings", fields: [parentId], references: [id], onDelete: SetNull)
+  openings  Exhibition[]   @relation("Openings")
+  artForms  ExhibitionArtForm[]
   favorites Favorite[]
+  bookmarks Bookmark[]
+
+  @@index([run, endsOn])
+  @@index([venueId])
+  @@index([withdrawnAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ArtForm — the medium. A table rather than an enum because the list is
+// editorial and will keep growing; every addition would otherwise be a
+// migration. Carries `color`, which is the more useful thing to tint map pins
+// by than event format.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ArtForm {
+  id    String @id @default(uuid())
+  name  String
+  slug  String @unique
+  color String
+
+  exhibitions ExhibitionArtForm[]
+}
+
+/// Many-to-many: a show is rarely a single medium, which a lone `categoryId`
+/// forced it to be.
+model ExhibitionArtForm {
+  exhibitionId String
+  artFormId    String
+
+  exhibition Exhibition @relation(fields: [exhibitionId], references: [id], onDelete: Cascade)
+  artForm ArtForm @relation(fields: [artFormId], references: [id], onDelete: Cascade)
+
+  @@id([exhibitionId, artFormId])
+  @@index([artFormId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,21 +321,100 @@ model User {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
+  /// Last time the user looked at what's new at the venues they follow.
+  /// Null means never — treated as "since you signed up" so a new account is
+  /// not greeted with every exhibition in the city as an update.
+  venueAlertsSeenAt DateTime?
+
   favorites Favorite[]
+  bookmarks Bookmark[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Favorite
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Favorite — the heart. Taste, not intent: things that persist and have no
+// deadline. Targets a venue OR a PERMANENT event, never both (exclusive arc,
+// enforced by a CHECK constraint in the migration).
+//
+// Two nullable FKs rather than a polymorphic (targetType, targetId) pair,
+// because that pattern cannot have real foreign keys.
+//
+// Both @@unique constraints coexist safely: Postgres treats NULLs as distinct,
+// so venue hearts never collide with event hearts.
+// ─────────────────────────────────────────────────────────────────────────────
+
 model Favorite {
   id        String   @id @default(uuid())
-  userId    String
-  eventId   String
-  createdAt DateTime @default(now())
+  userId       String
+  exhibitionId String?
+  venueId      String?
+  createdAt    DateTime @default(now())
 
-  user  User  @relation(fields: [userId], references: [id])
-  event Event @relation(fields: [eventId], references: [id])
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exhibition Exhibition? @relation(fields: [exhibitionId], references: [id], onDelete: Cascade)
+  venue      Venue?      @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, eventId])
+  @@unique([userId, exhibitionId])
+  @@unique([userId, venueId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bookmark — intent, with a clock on it. Only ever a TEMPORARY event, so a
+// single non-null target and no constraint needed. Separate from Favorite
+// because their columns diverge: reminders and a done state here, notification
+// preferences there.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Bookmark {
+  id        String    @id @default(uuid())
+  userId       String
+  exhibitionId String
+  /// "Tell me before it closes." Null = no reminder wanted.
+  remindAt     DateTime?
+  createdAt    DateTime  @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exhibition Exhibition @relation(fields: [exhibitionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, exhibitionId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TelemetryEvent — crash reports and product events.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Deliberately holds no relation to User and no foreign keys.
+///
+/// `installId` is a random per-install UUID generated on the device, not the
+/// account id: it groups events without identifying a person, so this table
+/// stays outside the scope of an account deletion. Joining it to User would
+/// turn pseudonymous diagnostics into personal data and make DELETE /users/me
+/// incomplete the moment it shipped.
+model TelemetryEvent {
+  id         String   @id @default(uuid())
+  /// 'error' or 'event'.
+  kind       String
+  /// Event name from the client allowlist, or the error class.
+  name       String
+  installId  String
+  platform   String
+  appVersion String
+
+  /// Scrubbed on the device before sending; scrubbed again on arrival.
+  message    String?
+  stack      String?
+  /// Small scalar map. No free text, by construction on the client.
+  props      Json?
+
+  /// When the client says it happened, and when we received it. Both, because
+  /// a keepalive report can arrive long after the crash that produced it.
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+
+  /// Reading patterns are "recent errors" and "count by name".
+  @@index([kind, createdAt])
+  @@index([name, createdAt])
 }

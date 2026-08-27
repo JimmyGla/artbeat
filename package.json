@@ -1,0 +1,32 @@
+{
+  "name": "artbeat",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Root convenience scripts. The real packages are in ./server and ./client \u2014 this file only forwards commands so they work from the repo root. Deliberately has no dependencies and no npm workspaces, so it cannot change how either package resolves its own node_modules.",
+  "scripts": {
+    "build": "cd client && npm run build",
+    "build:device": "cd client && npm run build:device",
+    "build:mobile": "cd client && npm run build:mobile",
+    "data:refresh": "cd server && npm run data:refresh",
+    "db:audit": "cd server && npm run db:audit",
+    "db:clear-events": "cd server && npm run db:clear-events",
+    "db:reconcile": "cd server && npm run db:reconcile",
+    "db:repair-descriptions": "cd server && npm run db:repair-descriptions",
+    "db:repair-venues": "cd server && npm run db:repair-venues",
+    "db:seed-permanent": "cd server && npm run db:seed-permanent",
+    "db:tag-art-forms": "cd server && npm run db:tag-art-forms",
+    "dev": "cd server && npm run dev & cd client && npm run dev & wait",
+    "dev:client": "cd client && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "install:all": "cd server && npm install && cd ../client && npm install",
+    "ios": "cd client && npx cap open ios",
+    "prisma:generate": "cd server && npm run prisma:generate",
+    "prisma:migrate": "cd server && npm run prisma:migrate",
+    "prisma:studio": "cd server && npm run prisma:studio",
+    "scrape": "cd server && npm run scrape",
+    "telemetry:prune": "cd server && npm run telemetry:prune",
+    "telemetry:report": "cd server && npm run telemetry:report",
+    "test": "npm --prefix server test && npm --prefix client test",
+    "typecheck": "cd server && npm run typecheck && cd ../client && npx tsc --noEmit"
+  }
+}

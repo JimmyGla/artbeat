@@ -1,37 +1,52 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import EventCard, { EventCardData } from '../components/EventCard'
-import CitySelector from '../components/CitySelector'
+import { useState, useEffect, useCallback } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
+import ExhibitionCard, { ExhibitionCardData } from '../components/ExhibitionCard'
+import SaveButton from '../components/SaveButton'
+import StatusBarScrim from '../components/StatusBarScrim'
 import { SkeletonGrid } from '../components/Skeleton'
-import { useAuth }      from '../context/AuthContext'
-import { useFavorites } from '../context/FavoritesContext'
-import { useToast }     from '../context/ToastContext'
-import { useTitle }     from '../hooks/useTitle'
-import { API_BASE }     from '../lib/api'
+import { useAuth }  from '../context/AuthContext'
+import { useSaved } from '../context/SavedContext'
+import { useTitle } from '../hooks/useTitle'
+import { API_BASE } from '../lib/api'
+import { closingLabel, daysUntilClose, venueKindLabel } from '../lib/format'
+
+/**
+ * Saved, in two lists — which is the whole reason for having two verbs.
+ *
+ *   Places  — venues and permanent collections. Evergreen; no urgency.
+ *   To see  — bookmarked shows, ordered by what closes soonest, because that
+ *             is the only ordering that answers a question with a clock on it.
+ *
+ * Ended bookmarks move to Archive rather than lingering, so the live list stays
+ * trustworthy without discarding history.
+ */
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type FavoriteEvent = EventCardData & { startDate: string }
-
-// ─── Pull-to-refresh indicator ────────────────────────────────────────────────
-
-function PullIndicator({ distance, refreshing }: { distance: number; refreshing: boolean }) {
-  if (distance === 0 && !refreshing) return null
-  const THRESHOLD = 60
-  const opacity   = Math.min((distance / THRESHOLD) * 2, 1)
-  return (
-    <div
-      className="absolute left-0 right-0 z-10 flex justify-center pointer-events-none"
-      style={{ top: `${distance - 48}px`, opacity }}
-    >
-      <div className={`w-9 h-9 rounded-full bg-white shadow-md flex items-center justify-center ${refreshing ? 'animate-spin' : ''}`}>
-        <svg className="w-5 h-5 text-brand-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-      </div>
-    </div>
-  )
+interface SavedVenue {
+  id:       string
+  name:     string
+  kind:     string
+  address:  string
+  imageUrl: string | null
 }
+
+interface SavedResponse {
+  places:   { id: string; venue: SavedVenue | null; exhibition: ExhibitionCardData | null }[]
+  toSee:    { id: string; remindAt: string | null; exhibition: ExhibitionCardData }[]
+  archived: { id: string; exhibition: ExhibitionCardData }[]
+}
+
+type Tab = 'places' | 'toSee'
+
+interface VenueUpdate {
+  id: string
+  title: string
+  imageUrl: string | null
+  venue: { id: string; name: string } | null
+}
+
+const API = API_BASE
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -43,9 +58,9 @@ function SignInPrompt() {
         <circle cx="60" cy="60" r="56" stroke="#6B7280" strokeWidth="2" strokeDasharray="6 4" />
         <path d="M60 80C60 80 30 62 30 44a18 18 0 0136 0 18 18 0 0136 0C102 62 60 80 60 80z" fill="#E5E7EB" />
       </svg>
-      <h1 className="text-xl font-bold text-gray-800 mb-2">Save your favourites</h1>
+      <h1 className="text-xl font-bold text-gray-800 mb-2">Keep track of what you love</h1>
       <p className="text-sm text-gray-400 max-w-xs mb-8 leading-relaxed">
-        Sign in to save events and exhibitions you want to attend. They'll be waiting for you here.
+        Sign in to follow the places you care about and save shows before they close.
       </p>
       <button
         onClick={() => navigate('/login?redirect=/favorites')}
@@ -63,31 +78,85 @@ function SignInPrompt() {
   )
 }
 
-function EmptyState() {
+/**
+ * Empty states differ per tab, because the useful next action differs: an empty
+ * Places invites browsing venues, an empty To see invites browsing what's on.
+ * One shared empty state could only ever suit one of them.
+ */
+function EmptyTab({ tab }: { tab: Tab }) {
   const navigate = useNavigate()
+  const places = tab === 'places'
   return (
-    <div className="flex flex-col items-center justify-center min-h-[calc(100dvh-4rem)] px-8 text-center">
-      <svg className="w-24 h-24 mb-6 opacity-25" viewBox="0 0 120 120" fill="none" aria-hidden="true">
-        <path d="M60 95C60 95 20 70 20 44a28 28 0 0156 0 28 28 0 0156 0C132 70 60 95 60 95z" stroke="#6B7280" strokeWidth="3" strokeLinejoin="round" />
-        <path d="M40 50h40M40 60h28" stroke="#6B7280" strokeWidth="2.5" strokeLinecap="round" />
-      </svg>
-      <h1 className="text-xl font-bold text-gray-800 mb-2">No saved events yet</h1>
-      <p className="text-sm text-gray-400 max-w-xs mb-8 leading-relaxed">
-        Tap the heart on any event to save it here so you never miss it.
+    <div className="flex flex-col items-center px-8 pt-16 pb-10 text-center">
+      <span className="text-5xl mb-4 opacity-30">{places ? '🏛' : '🔖'}</span>
+      <h2 className="text-base font-bold text-gray-800 mb-1.5">
+        {places ? 'No places yet' : 'Nothing on your list'}
+      </h2>
+      <p className="text-sm text-gray-400 max-w-xs mb-7 leading-relaxed">
+        {places
+          ? 'Tap the heart on a museum or gallery to keep it here.'
+          : 'Bookmark a show and it will appear here, sorted by what closes first.'}
       </p>
       <button
-        onClick={() => navigate('/discover')}
-        className="px-8 h-12 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-xl text-sm transition-colors"
+        onClick={() => navigate(places ? '/discover?tab=venues' : '/discover')}
+        className="px-7 h-11 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-xl text-sm transition-colors"
       >
-        Start exploring
+        {places ? 'Browse venues' : "See what's on"}
       </button>
+    </div>
+  )
+}
+
+function VenueRow({ venue }: { venue: SavedVenue }) {
+  return (
+    <Link
+      to={`/venue/${venue.id}`}
+      className="flex items-center gap-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-2.5 active:scale-[0.99] transition-transform"
+    >
+      <div className="w-16 h-16 shrink-0 rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center">
+        {venue.imageUrl
+          ? <img src={venue.imageUrl} alt="" loading="lazy" className="w-full h-full object-cover" />
+          : <span className="text-2xl opacity-40" aria-hidden="true">🏛</span>}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold text-gray-400 mb-0.5">{venueKindLabel(venue.kind)}</p>
+        <h3 className="text-sm font-bold text-gray-900 leading-snug line-clamp-1">{venue.name}</h3>
+        <p className="text-xs text-gray-400 line-clamp-1">{venue.address}</p>
+      </div>
+
+      <SaveButton target={{ kind: 'venue', id: venue.id }} variant="plain" size="sm" />
+    </Link>
+  )
+}
+
+/** A bookmark row leads with time remaining — that is what it is for. */
+function ToSeeRow({ exhibition }: { exhibition: ExhibitionCardData }) {
+  const label = closingLabel(exhibition.endsOn)
+  const days  = daysUntilClose(exhibition.endsOn)
+  const urgent = days !== null && days <= 14
+
+  return (
+    <div className="relative">
+      {label && (
+        <div className={`flex items-center gap-1.5 px-1 pb-1.5 text-xs font-bold ${
+          urgent ? 'text-amber-600' : 'text-gray-400'
+        }`}>
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path strokeLinecap="round" d="M12 7v5l3 2" />
+          </svg>
+          {label}
+        </div>
+      )}
+      <ExhibitionCard exhibition={exhibition} />
     </div>
   )
 }
 
 function SectionHeading({ label, count }: { label: string; count: number }) {
   return (
-    <div className="flex items-center gap-2 px-4 pt-5 pb-2">
+    <div className="flex items-center gap-2 pt-1 pb-2">
       <span className="text-sm font-bold text-gray-700">{label}</span>
       <span className="text-xs font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{count}</span>
     </div>
@@ -98,195 +167,207 @@ function SectionHeading({ label, count }: { label: string; count: number }) {
 
 export default function FavoritesPage() {
   const { user, loading: authLoading, authFetch } = useAuth()
-  const { toggle, loading: favLoading }           = useFavorites()
-  const { showToast }                             = useToast()
+  const { loading: savedLoading } = useSaved()
 
-  useTitle('Saved', 'Your saved art events and exhibitions.')
+  const [data,    setData]    = useState<SavedResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [tab,     setTab]     = useState<Tab>('toSee')
+  const [showArchive, setShowArchive] = useState(false)
+  const [updates, setUpdates] = useState<VenueUpdate[]>([])
+  const navigate = useNavigate()
 
-  const [events,       setEvents]       = useState<FavoriteEvent[]>([])
-  const [dataLoading,  setDataLoading]  = useState(false)
-  const [pastExpanded, setPastExpanded] = useState(false)
+  useTitle('Saved', 'The places you follow and the shows you mean to catch.')
 
-  // Pull-to-refresh
-  const [pullDistance, setPullDistance] = useState(0)
-  const [refreshing,   setRefreshing]   = useState(false)
-  const touchStartY = useRef(0)
-  const isPulling   = useRef(false)
-  const PULL_THRESHOLD = 60
-  const scrollRef      = useRef<HTMLDivElement>(null)
-  const lastScrollY    = useRef(0)
-
-  const API = API_BASE
-
-  // ── Fetch favourites ────────────────────────────────────────────────────
-  const fetchFavorites = useCallback(async () => {
-    if (!user) return
-    setDataLoading(true)
+  const load = useCallback(async () => {
+    if (!user) { setData(null); setLoading(false); return }
+    setLoading(true)
     try {
-      const data: FavoriteEvent[] = await authFetch(`${API}/api/favorites`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      setEvents(data)
-    } catch {
-      showToast('Failed to load saved events.', 'error')
+      const r = await authFetch(`${API}/api/saved`)
+      if (!r.ok) throw new Error('Failed to load saved items')
+      setData(await r.json())
+    } catch (err) {
+      console.error(err)
     } finally {
-      setDataLoading(false)
+      setLoading(false)
     }
-  }, [user, authFetch, API, showToast])
+  }, [user, authFetch])
 
-  useEffect(() => { fetchFavorites() }, [fetchFavorites])
+  useEffect(() => { void load() }, [load])
 
-  // ── Pull-to-refresh ─────────────────────────────────────────────────────
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if ((scrollRef.current?.scrollTop ?? 1) > 0) return
-    touchStartY.current = e.touches[0].clientY
-    isPulling.current   = true
-  }, [])
+  // New shows at hearted venues. Fetched separately so a failure here leaves
+  // the saved lists intact — this is an extra, not the point of the screen.
+  useEffect(() => {
+    if (!user) { setUpdates([]); return }
+    authFetch(`${API}/api/saved/updates`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { updates: VenueUpdate[] }) => setUpdates(d.updates))
+      .catch((err) => console.warn('[favorites] updates unavailable', err))
+  }, [user, authFetch])
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!isPulling.current) return
-    const delta = e.touches[0].clientY - touchStartY.current
-    if (delta > 0) setPullDistance(Math.min(delta * 0.5, 100))
-  }, [])
+  // Clearing is deliberate and one-way: marked read only once the user is
+  // actually looking at the list, never on mere page load.
+  const dismissUpdates = useCallback(() => {
+    setUpdates([])
+    authFetch(`${API}/api/saved/updates/seen`, { method: 'POST' })
+      .catch((err) => console.warn('[favorites] could not mark updates seen', err))
+  }, [authFetch])
 
-  const handleTouchEnd = useCallback(async () => {
-    if (!isPulling.current) return
-    isPulling.current = false
-    if (pullDistance >= PULL_THRESHOLD) {
-      setRefreshing(true)
-      await fetchFavorites()
-      setRefreshing(false)
-    }
-    setPullDistance(0)
-  }, [pullDistance, fetchFavorites])
-
-  // ── Scroll direction → nav visibility ──────────────────────────────────
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const y = el.scrollTop
-    if (y > lastScrollY.current + 8)      window.dispatchEvent(new CustomEvent('nav:hide'))
-    else if (y < lastScrollY.current - 8) window.dispatchEvent(new CustomEvent('nav:show'))
-    lastScrollY.current = y
-  }, [])
-
-  useEffect(() => () => { window.dispatchEvent(new CustomEvent('nav:show')) }, [])
-
-  // ── Guards ──────────────────────────────────────────────────────────────
   if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100dvh-4rem)]">
-        <div className="w-8 h-8 border-4 border-brand-500 border-t-transparent rounded-full animate-spin" aria-label="Loading" />
+        <div className="w-8 h-8 border-4 border-brand-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
-  if (!user)                      return <SignInPrompt />
-  if (favLoading || dataLoading)  return <SkeletonGrid count={6} />
 
-  const now      = new Date()
-  const upcoming = events.filter((e) => new Date(e.startDate) >= now)
-  const past     = events.filter((e) => new Date(e.startDate) < now)
+  if (!user) return <SignInPrompt />
+  if (loading || savedLoading || !data) return <SkeletonGrid count={4} />
 
-  if (events.length === 0) return <EmptyState />
+  const places = data.places
+  const toSee  = data.toSee
+  const counts = { places: places.length, toSee: toSee.length }
 
   return (
-    <div
-      ref={scrollRef}
-      className="bg-gray-50 min-h-[calc(100dvh-4rem)] pb-8 overflow-y-auto relative"
-      onScroll={handleScroll}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    >
-      <PullIndicator distance={pullDistance} refreshing={refreshing} />
-
-      {/* ── Page header ───────────────────────────────────────────────── */}
-      <div className="px-4 pt-6 pb-2 flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Saved</h1>
-          <p className="text-sm text-gray-400 mt-0.5">
-            {events.length} event{events.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <div className="mt-1">
-          <CitySelector variant="row" />
-        </div>
+    <div className="bg-gray-50 min-h-dvh overflow-y-auto pb-[calc(var(--nav-h)+1.5rem)]">
+      {/* The header scrolls away here (unlike Discover's sticky one), so cards
+          would slide up into the status bar and collide with the clock. */}
+      <StatusBarScrim className="bg-gray-50" />
+      <div className="px-4 pb-2" style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top, 0px))' }}>
+        <h1 className="text-2xl font-bold text-gray-900">Saved</h1>
       </div>
 
-      {/* ── Coming up ─────────────────────────────────────────────────── */}
-      {upcoming.length > 0 && (
-        <>
-          <SectionHeading label="Coming up" count={upcoming.length} />
-          <div className="grid grid-cols-2 gap-3 px-4">
-            {upcoming.map((event) => (
-              <div key={event.id} className="relative">
-                <EventCard event={event} />
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    toggle(event.id)
-                    setEvents((prev) => prev.filter((ev) => ev.id !== event.id))
-                  }}
-                  aria-label={`Remove "${event.title}" from saved`}
-                  className="absolute top-1 left-1 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-gray-900/60 text-white hover:bg-gray-900/80 transition-colors"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* ── Past events ───────────────────────────────────────────────── */}
-      {past.length > 0 && (
-        <>
+      {/* Two lists, because the two verbs mean different things. */}
+      <div role="tablist" aria-label="Saved items" className="flex gap-1 mx-4 mb-3 bg-gray-100 rounded-xl p-1">
+        {([
+          ['toSee',  'To see', counts.toSee],
+          ['places', 'Places', counts.places],
+        ] as const).map(([key, label, count]) => (
           <button
-            onClick={() => setPastExpanded((v) => !v)}
-            aria-expanded={pastExpanded}
-            className="w-full flex items-center gap-2 px-4 pt-5 pb-2 text-left min-h-[44px]"
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-colors min-h-[40px] ${
+              tab === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+            }`}
           >
-            <span className="text-sm font-bold text-gray-500">Past events</span>
-            <span className="text-xs font-semibold bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">{past.length}</span>
-            <svg
-              className={`w-4 h-4 text-gray-400 ml-auto transition-transform ${pastExpanded ? 'rotate-180' : ''}`}
-              fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
+            {label}
+            {count > 0 && (
+              <span className={`text-xs font-bold px-1.5 rounded-full ${
+                tab === key ? 'bg-brand-50 text-brand-600' : 'bg-gray-200 text-gray-500'
+              }`}>{count}</span>
+            )}
           </button>
+        ))}
+      </div>
 
-          {pastExpanded && (
-            <div className="grid grid-cols-2 gap-3 px-4">
-              {past.map((event) => (
-                <div key={event.id} className="relative opacity-70">
-                  <EventCard event={event} />
+      <div className="px-4">
+        {tab === 'toSee' && (
+          toSee.length === 0 ? <EmptyTab tab="toSee" /> : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                {toSee.map(({ id, exhibition }) => <ToSeeRow key={id} exhibition={exhibition} />)}
+              </div>
+
+              {/* Ended shows are kept, just out of the way. */}
+              {data.archived.length > 0 && (
+                <div className="mt-7">
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      toggle(event.id)
-                      setEvents((prev) => prev.filter((ev) => ev.id !== event.id))
-                    }}
-                    aria-label={`Remove "${event.title}" from saved`}
-                    className="absolute top-1 left-1 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-gray-900/60 text-white hover:bg-gray-900/80 transition-colors"
+                    onClick={() => setShowArchive((v) => !v)}
+                    aria-expanded={showArchive}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 hover:text-gray-600 min-h-[40px]"
                   >
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    <svg className={`w-4 h-4 transition-transform ${showArchive ? 'rotate-90' : ''}`}
+                         fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                     </svg>
+                    Closed ({data.archived.length})
                   </button>
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-xs font-semibold text-center py-1 rounded-b-2xl pointer-events-none">
-                    Past event
-                  </div>
+
+                  {showArchive && (
+                    <div className="grid grid-cols-2 gap-3 mt-2 opacity-60">
+                      {data.archived.map(({ id, exhibition }) => <ExhibitionCard key={id} exhibition={exhibition} />)}
+                    </div>
+                  )}
                 </div>
-              ))}
+              )}
+            </>
+          )
+        )}
+
+        {tab === 'places' && (
+          places.length === 0 ? <EmptyTab tab="places" /> : (
+            <div className="flex flex-col gap-5">
+              {/* The payoff for following a venue: something new opened there.
+                  Sits above the list because it is the only part of this screen
+                  the user has not seen before. */}
+              {updates.length > 0 && (
+                <section className="rounded-2xl bg-brand-50 border border-brand-100 p-3">
+                  <div className="flex items-center justify-between mb-2.5 px-0.5">
+                    <h2 className="text-sm font-semibold text-brand-900">
+                      New at your places
+                    </h2>
+                    <button
+                      onClick={dismissUpdates}
+                      className="text-xs font-medium text-brand-600 px-2 py-1 -mr-1 rounded-lg active:bg-brand-100"
+                    >
+                      Mark as read
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {updates.map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => navigate(`/exhibition/${u.id}`)}
+                        className="flex items-center gap-3 text-left p-1.5 rounded-xl active:bg-brand-100/60"
+                      >
+                        {u.imageUrl ? (
+                          <img
+                            src={u.imageUrl}
+                            alt=""
+                            loading="lazy"
+                            className="w-11 h-11 rounded-lg object-cover shrink-0 bg-brand-100"
+                          />
+                        ) : (
+                          <span className="w-11 h-11 rounded-lg bg-brand-100 shrink-0" />
+                        )}
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-gray-900 truncate">{u.title}</span>
+                          {u.venue && (
+                            <span className="block text-xs text-gray-500 truncate">{u.venue.name}</span>
+                          )}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {places.some((p) => p.venue) && (
+                <section>
+                  <SectionHeading label="Venues" count={places.filter((p) => p.venue).length} />
+                  <div className="flex flex-col gap-2.5">
+                    {places.filter((p) => p.venue).map((p) => (
+                      <VenueRow key={p.id} venue={p.venue!} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {places.some((p) => p.exhibition) && (
+                <section>
+                  <SectionHeading label="Permanent collections" count={places.filter((p) => p.exhibition).length} />
+                  <div className="grid grid-cols-2 gap-3">
+                    {places.filter((p) => p.exhibition).map((p) => (
+                      <ExhibitionCard key={p.id} exhibition={p.exhibition!} />
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
-          )}
-        </>
-      )}
+          )
+        )}
+      </div>
     </div>
   )
 }

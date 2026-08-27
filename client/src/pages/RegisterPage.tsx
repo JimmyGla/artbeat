@@ -1,9 +1,7 @@
 import { useState, FormEvent } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { API_BASE } from '../lib/api'
-
-const API = API_BASE
+import { signInWithGoogle } from '../lib/oauth'
 
 export default function RegisterPage() {
   const navigate                = useNavigate()
@@ -31,8 +29,11 @@ export default function RegisterPage() {
     }
   }
 
-  function handleGoogleLogin() {
-    window.location.href = `${API}/api/auth/google`
+  async function handleGoogleLogin() {
+    setError('')
+    // See lib/oauth — native must use the system browser, web can redirect.
+    const { error: oauthError } = await signInWithGoogle()
+    if (oauthError) setError(oauthError)
   }
 
   return (
@@ -46,7 +47,7 @@ export default function RegisterPage() {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Create account</h1>
-          <p className="text-sm text-gray-500 mt-1">Start saving your favourite events</p>
+          <p className="text-sm text-gray-500 mt-1">Start saving what you want to see</p>
         </div>
 
         {/* Google OAuth */}

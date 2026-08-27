@@ -1,16 +1,19 @@
-import { useState, useEffect, useRef, FormEvent } from 'react'
+import { useState, useRef, useEffect, FormEvent } from 'react'
 import { useNavigate }   from 'react-router-dom'
+import StatusBarScrim   from '../components/StatusBarScrim'
 import { useAuth }       from '../context/AuthContext'
-import { useFavorites }  from '../context/FavoritesContext'
+import { useSaved }       from '../context/SavedContext'
 import { useCity }       from '../context/CityContext'
 import { API_BASE }      from '../lib/api'
+import { Capacitor }      from '@capacitor/core'
+import { LocalNotifications } from '@capacitor/local-notifications'
+import { ensurePermission, syncReminders, pendingCount } from '../lib/reminders'
+import { track, hasOptedOut, setOptedOut } from '../lib/telemetry'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const API         = API_BASE
 const APP_VERSION = '0.1.0'
-const NOTIF_KEY   = 'artbeat_notifications'
-const LANG_KEY    = 'artbeat_language'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -94,26 +97,6 @@ function Section({ children }: { children: React.ReactNode }) {
     <div className="mx-4 mb-4 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100">
       {children}
     </div>
-  )
-}
-
-// ─── Toggle switch ────────────────────────────────────────────────────────────
-
-function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
-  return (
-    <button
-      onClick={onToggle}
-      aria-pressed={on}
-      className={`relative w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-        on ? 'bg-brand-600' : 'bg-gray-200'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-          on ? 'translate-x-5' : 'translate-x-0'
-        }`}
-      />
-    </button>
   )
 }
 
@@ -218,29 +201,114 @@ function Toast({ message, visible }: { message: string; visible: boolean }) {
 export default function ProfilePage() {
   const navigate                         = useNavigate()
   const { user, loading, logout, authFetch, updateUser } = useAuth()
-  const { favoritedIds }                 = useFavorites()
+  const { counts }                       = useSaved()
   const { allCities, citySlug, setCity } = useCity()
 
-  // ── Preferences (localStorage) ────────────────────────────────────────────
-  const [notifOn,  setNotifOn]  = useState(() => localStorage.getItem(NOTIF_KEY) !== 'false')
-  const [language, setLanguage] = useState(() => localStorage.getItem(LANG_KEY) ?? 'en')
+  // ── Closing reminders ─────────────────────────────────────────────────────
+  //
+  // The switch reflects the OS permission, not a preference of our own: the
+  // system setting is the real state, and storing a second copy would let the
+  // two disagree after a change in Settings. `blocked` is the denied case — iOS
+  // will not prompt twice, so the row explains where to fix it instead of
+  // offering a toggle that silently does nothing.
+  const [remindersOn,      setRemindersOn]      = useState(false)
+  const [remindersBlocked, setRemindersBlocked] = useState(false)
+  const [remindersCount,   setRemindersCount]   = useState(0)
 
-  // ── Favorites stats ───────────────────────────────────────────────────────
-  const [citiesExplored, setCitiesExplored] = useState(0)
+  // ── Diagnostics opt-out ───────────────────────────────────────────────────
+  //
+  // Stored on the device, checked before anything is sent. Presented as a real
+  // choice rather than buried, because the honest basis for collecting this at
+  // all is that it is anonymous, minimal, and refusable.
+  const [diagnosticsOn, setDiagnosticsOn] = useState(!hasOptedOut())
+
+  const toggleDiagnostics = () => {
+    const next = !diagnosticsOn
+    setDiagnosticsOn(next)
+    setOptedOut(!next)
+    showToast(next ? 'Diagnostics on' : 'Diagnostics off')
+  }
+  const remindersSupported = Capacitor.isNativePlatform()
 
   useEffect(() => {
-    if (!user || favoritedIds.size === 0) { setCitiesExplored(0); return }
-    authFetch(`${API}/api/favorites`)
-      .then((r) => r.json())
-      .then((events: { venue?: { citySlug?: string } }[]) => {
-        const slugs = new Set(events.map((e) => e.venue?.citySlug).filter(Boolean))
-        // Fallback: count the current city if we have any favorites
-        setCitiesExplored(slugs.size || (favoritedIds.size > 0 ? 1 : 0))
+    if (!remindersSupported) return
+    LocalNotifications.checkPermissions()
+      .then(async ({ display }) => {
+        setRemindersOn(display === 'granted')
+        setRemindersBlocked(display === 'denied')
+        if (display === 'granted') setRemindersCount(await pendingCount())
       })
-      .catch(() => setCitiesExplored(favoritedIds.size > 0 ? 1 : 0))
-  }, [user, favoritedIds.size, authFetch])
+      .catch(() => setRemindersBlocked(true))
+  }, [remindersSupported])
+
+  const handleRemindersToggle = async () => {
+    if (remindersOn) {
+      // We cannot revoke an OS permission, so "off" means clear the schedule
+      // and point at the only place that can actually turn it off.
+      await syncReminders([])
+      setRemindersOn(false)
+      setRemindersCount(0)
+      showToast('Reminders cleared. Turn off notifications in Settings to stop them for good.')
+      return
+    }
+
+    const granted = await ensurePermission()
+    if (!granted) {
+      setRemindersBlocked(true)
+      showToast('Notifications are off for ArtBeat. Enable them in Settings.')
+      return
+    }
+
+    setRemindersOn(true)
+    // Existing bookmarks have no reminders yet — this is the moment they get them.
+    try {
+      const r = await authFetch(`${API_BASE}/api/saved/reminders`)
+      if (!r.ok) throw new Error(String(r.status))
+      const { reminders } = await r.json()
+      const n = await syncReminders(reminders, { prompt: true })
+      setRemindersCount(n)
+      track('reminders_enabled', { scheduled: n })
+      showToast(n === 1 ? '1 reminder scheduled' : `${n} reminders scheduled`)
+    } catch (err) {
+      console.warn('[profile] could not schedule reminders', err)
+      showToast('Reminders are on, but the list could not be loaded.')
+    }
+  }
+
+  // ── Preferences (localStorage) ────────────────────────────────────────────
+
+  // Saved counts come from SavedContext, which already tracks them for the
+  // cards — no extra request needed here.
 
   // ── Edit profile sheet ────────────────────────────────────────────────────
+  const [deleteOpen,    setDeleteOpen]    = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState('')
+  const [deleteError,   setDeleteError]   = useState('')
+  const [deleting,      setDeleting]      = useState(false)
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      const r = await authFetch(`${API}/api/users/me`, { method: 'DELETE' })
+      if (!r.ok && r.status !== 204) {
+        // The server refuses rather than half-deleting, so its message is
+        // accurate about what did or did not happen.
+        const body = await r.json().catch(() => null)
+        setDeleteError(body?.error ?? 'Could not delete your account. Please try again.')
+        return
+      }
+      // Clear the local session too, or the app keeps a token for an account
+      // that no longer exists.
+      await logout()
+      navigate('/', { replace: true })
+    } catch {
+      setDeleteError('Could not reach the server. Nothing was deleted.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const [editOpen,       setEditOpen]       = useState(false)
   const [editName,       setEditName]       = useState('')
   const [editAvatarUrl,  setEditAvatarUrl]  = useState('')
@@ -293,7 +361,7 @@ export default function ProfilePage() {
   function handleSuggestSend() {
     const subject = encodeURIComponent(`ArtBeat event suggestion: ${suggestName}`)
     const body    = encodeURIComponent(
-      `Event name: ${suggestName}\nLink / details: ${suggestUrl}\n\nSuggested via ArtBeat v${APP_VERSION}`,
+      `Exhibition or event name: ${suggestName}\nLink / details: ${suggestUrl}\n\nSuggested via ArtBeat v${APP_VERSION}`,
     )
     window.open(`mailto:hello@artbeat.app?subject=${subject}&body=${body}`)
     setSuggestSent(true)
@@ -340,7 +408,7 @@ export default function ProfilePage() {
           </svg>
         </div>
         <h1 className="text-xl font-bold text-gray-800 mb-2">Sign in to view your profile</h1>
-        <p className="text-sm text-gray-400 mb-8 max-w-xs">Access your saved events, preferences and account settings.</p>
+        <p className="text-sm text-gray-400 mb-8 max-w-xs">Access your saved places, your list, and account settings.</p>
         <button
           onClick={() => navigate('/login?redirect=/profile')}
           className="w-full max-w-xs h-12 bg-brand-600 text-white font-semibold rounded-xl text-sm"
@@ -357,10 +425,12 @@ export default function ProfilePage() {
     <>
       <Toast message={toast} visible={toastVisible} />
 
-      <div className="bg-gray-50 min-h-[calc(100dvh-4rem)] pb-10 overflow-y-auto">
+      <StatusBarScrim className="bg-white" />
+
+      <div className="bg-gray-50 min-h-dvh overflow-y-auto pb-[calc(var(--nav-h)+1.5rem)]">
 
         {/* ── User header ──────────────────────────────────────────────── */}
-        <div className="bg-white px-4 pt-8 pb-6 flex flex-col items-center border-b border-gray-100 mb-4">
+        <div className="bg-white px-4 pb-6 flex flex-col items-center border-b border-gray-100 mb-4" style={{ paddingTop: 'calc(1.25rem + env(safe-area-inset-top, 0px))' }}>
           <div className="relative mb-3">
             <Avatar avatarUrl={user.avatarUrl} name={user.name} email={user.email} size={80} />
           </div>
@@ -383,8 +453,8 @@ export default function ProfilePage() {
         {/* ── Stats row ────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-3 mx-4 mb-4">
           {[
-            { value: favoritedIds.size, label: 'Events saved', icon: '❤️' },
-            { value: citiesExplored,   label: 'Cities explored', icon: '🗺️' },
+            { value: counts.places, label: 'Places',  icon: '❤️' },
+            { value: counts.toSee,  label: 'To see',  icon: '🔖' },
           ].map(({ value, label, icon }) => (
             <div key={label} className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-4 flex flex-col items-center text-center">
               <span className="text-2xl mb-1">{icon}</span>
@@ -399,28 +469,10 @@ export default function ProfilePage() {
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-2">Preferences</p>
         </div>
         <Section>
-          {/* Notifications */}
-          <RowItem
-            icon={
-              <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-              </svg>
-            }
-            label="Notifications"
-            right={
-              <Toggle
-                on={notifOn}
-                onToggle={() => {
-                  const next = !notifOn
-                  setNotifOn(next)
-                  localStorage.setItem(NOTIF_KEY, String(next))
-                }}
-              />
-            }
-          />
-
-          {/* Default city */}
-          <div className="flex items-center gap-3.5 px-4 py-3 border-b border-gray-100">
+          {/* Default city — the only real preference. The notifications and
+              language rows were removed: both wrote localStorage that nothing
+              read, so they promised behaviour the app does not have. */}
+          <div className="flex items-center gap-3.5 px-4 py-3">
             <span className="shrink-0 text-gray-400">
               <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -439,26 +491,84 @@ export default function ProfilePage() {
             </select>
           </div>
 
-          {/* Language */}
-          <div className="flex items-center gap-3.5 px-4 py-3">
+          {/* Closing reminders. This is a real toggle, unlike the notifications
+              switch that used to sit here — it drives an actual OS permission
+              and an actual schedule.
+
+              It exists because permission is otherwise only ever requested when
+              bookmarking something new, so anyone who already had bookmarks
+              would never be asked and would silently never get a reminder. iOS
+              also only shows its prompt once, so there has to be one honest
+              place to ask. */}
+          {remindersSupported && (
+            <div className="flex items-center gap-3.5 px-4 py-3 border-t border-gray-100">
+              <span className="shrink-0 text-gray-400">
+                <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+                </svg>
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-medium text-gray-800">Closing reminders</span>
+                <span className="block text-xs text-gray-500">
+                  {remindersBlocked
+                    ? 'Turn on notifications for ArtBeat in Settings'
+                    : remindersOn
+                      ? remindersCount === 1
+                        ? '1 reminder scheduled'
+                        : `${remindersCount} reminders scheduled`
+                      : 'A nudge three days before a saved show closes'}
+                </span>
+              </span>
+              <button
+                role="switch"
+                aria-checked={remindersOn}
+                aria-label="Closing reminders"
+                disabled={remindersBlocked}
+                onClick={handleRemindersToggle}
+                className={`shrink-0 w-11 h-6 rounded-full transition-colors relative ${
+                  remindersBlocked ? 'bg-gray-200 opacity-50' : remindersOn ? 'bg-brand-500' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${
+                    remindersOn ? 'left-[1.375rem]' : 'left-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+
+          {/* Diagnostics. Named for what it is; "Share analytics" would
+              overstate it and "Improve ArtBeat" would understate it. */}
+          <div className="flex items-center gap-3.5 px-4 py-3 border-t border-gray-100">
             <span className="shrink-0 text-gray-400">
               <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
               </svg>
             </span>
-            <span className="flex-1 text-sm font-medium text-gray-800">Language</span>
-            <select
-              value={language}
-              onChange={(e) => {
-                setLanguage(e.target.value)
-                localStorage.setItem(LANG_KEY, e.target.value)
-              }}
-              className="text-sm text-brand-600 font-semibold bg-transparent border-none outline-none cursor-pointer pr-1"
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-medium text-gray-800">Send diagnostics</span>
+              <span className="block text-xs text-gray-500">
+                Anonymous crash reports and usage counts. Never your account, searches, or location.
+              </span>
+            </span>
+            <button
+              role="switch"
+              aria-checked={diagnosticsOn}
+              aria-label="Send diagnostics"
+              onClick={toggleDiagnostics}
+              className={`shrink-0 w-11 h-6 rounded-full transition-colors relative ${
+                diagnosticsOn ? 'bg-brand-500' : 'bg-gray-300'
+              }`}
             >
-              <option value="en">English</option>
-              <option value="it">Italiano</option>
-            </select>
+              <span
+                className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${
+                  diagnosticsOn ? 'left-[1.375rem]' : 'left-0.5'
+                }`}
+              />
+            </button>
           </div>
+
         </Section>
 
         {/* ── App section ───────────────────────────────────────────────── */}
@@ -520,8 +630,59 @@ export default function ProfilePage() {
           </button>
         </div>
 
+        {/* ── Delete account ────────────────────────────────────────────────
+            Required: Apple rejects apps that create accounts without an
+            in-app way to delete them. Kept visually quiet and behind a typed
+            confirmation, because it is irreversible. */}
+        <div className="mx-4 mt-3">
+          <button
+            onClick={() => { setDeleteConfirm(''); setDeleteOpen(true) }}
+            className="w-full py-3 text-xs font-semibold text-gray-400 hover:text-red-500 transition-colors"
+          >
+            Delete account
+          </button>
+        </div>
+
         <p className="text-center text-xs text-gray-300 mt-5">ArtBeat v{APP_VERSION}</p>
       </div>
+
+      {/* ── Delete account ───────────────────────────────────────────── */}
+      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete account">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 leading-relaxed">
+            This removes your account, the places you follow and your list. It
+            cannot be undone.
+          </p>
+          <p className="text-sm text-gray-500">
+            Type <span className="font-semibold text-gray-800">delete</span> to confirm.
+          </p>
+          <input
+            value={deleteConfirm}
+            onChange={(e) => setDeleteConfirm(e.target.value)}
+            autoCapitalize="none"
+            autoCorrect="off"
+            placeholder="delete"
+            aria-label="Type delete to confirm"
+            className="w-full h-12 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+          />
+          {deleteError && (
+            <p className="text-sm text-red-600">{deleteError}</p>
+          )}
+          <button
+            onClick={handleDeleteAccount}
+            disabled={deleteConfirm.trim().toLowerCase() !== 'delete' || deleting}
+            className="w-full h-12 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-semibold rounded-xl text-sm transition-colors"
+          >
+            {deleting ? 'Deleting…' : 'Delete my account'}
+          </button>
+          <button
+            onClick={() => setDeleteOpen(false)}
+            className="w-full h-12 border border-gray-200 text-gray-700 font-semibold rounded-xl text-sm hover:bg-gray-50 transition-colors"
+          >
+            Keep my account
+          </button>
+        </div>
+      </Modal>
 
       {/* ── Edit profile bottom sheet ─────────────────────────────────── */}
       <BottomSheet open={editOpen} onClose={() => setEditOpen(false)} title="Edit profile">
@@ -589,7 +750,7 @@ export default function ProfilePage() {
               Know an event that should be on ArtBeat? Let us know and we'll add it.
             </p>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Event name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Exhibition or event name</label>
               <input
                 type="text"
                 value={suggestName}
@@ -630,7 +791,7 @@ export default function ProfilePage() {
           <h3 className="text-lg font-bold text-gray-900">ArtBeat</h3>
           <p className="text-xs text-gray-400 mt-0.5 mb-4">Version {APP_VERSION}</p>
           <p className="text-sm text-gray-500 leading-relaxed max-w-xs">
-            Discover art events, exhibitions, performances, and openings happening near you.
+            Discover exhibitions, performances, talks and openings happening near you.
             ArtBeat helps you explore the cultural scene of your city — right from your pocket.
           </p>
         </div>

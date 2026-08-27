@@ -46,6 +46,7 @@ export async function requireAuth(
     })
 
     req.user = user
+    req.supabaseUserId = sbUser.id
     next()
   } catch (err) {
     console.error('[requireAuth]', err)

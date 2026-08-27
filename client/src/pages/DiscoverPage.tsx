@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import EventCard, { EventCardData } from '../components/EventCard'
+import ExhibitionCard, { ExhibitionCardData } from '../components/ExhibitionCard'
 import VenueCard, { VenueCardData } from '../components/VenueCard'
 import CitySelector  from '../components/CitySelector'
 import { SkeletonGrid, SkeletonList } from '../components/Skeleton'
@@ -9,13 +10,15 @@ import { useToast }  from '../context/ToastContext'
 import { useDebounce } from '../hooks/useDebounce'
 import { useTitle }  from '../hooks/useTitle'
 import { MemCache }  from '../lib/memCache'
-import { API_BASE }  from '../lib/api'
+import { API_BASE, connectionError }  from '../lib/api'
+import { useUserLocation } from '../hooks/useUserLocation'
+import { track } from '../lib/telemetry'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface CategoryData { id: string; name: string; slug: string; color: string }
+interface ArtFormData { id: string; name: string; slug: string; color: string }
 type DateFilter = 'today' | 'week' | 'month' | 'all'
-type ViewTab    = 'events' | 'venues'
+type ViewTab    = 'onNow' | 'venues'
 
 const DATE_FILTERS: { key: DateFilter; label: string }[] = [
   { key: 'today', label: 'Today'      },
@@ -28,7 +31,7 @@ const API = API_BASE
 
 // ─── Module-level cache (survives re-renders, expires after 5 min) ────────────
 
-const eventsCache = new MemCache<EventCardData[]>()
+const eventsCache = new MemCache<ExhibitionCardData[]>()
 const venuesCache = new MemCache<VenueCardData[]>()
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -101,30 +104,33 @@ function EmptyState({ view }: { view: ViewTab }) {
         <circle cx="90" cy="70" r="1.5" fill="#D1D5DB" />
       </svg>
       <p className="font-bold text-gray-700 text-base mb-1">
-        {view === 'events' ? 'No events found' : 'No venues found'}
+        {view === 'onNow' ? 'Nothing on right now' : 'No venues found'}
       </p>
       <p className="text-sm text-gray-400 max-w-xs">
-        {view === 'events'
-          ? 'Try adjusting your filters or search term, or check back later for new events.'
+        {view === 'onNow'
+          ? 'Try adjusting your filters or search term, or check back later — listings change weekly.'
           : 'No venues match your current search. Try a different city or clear your filters.'}
       </p>
     </div>
   )
 }
 
-// ─── Virtualised events grid ──────────────────────────────────────────────────
-// Groups events into rows of 2 for useVirtualizer, avoiding DOM nodes for
+// ─── Virtualised exhibitions grid ──────────────────────────────────────────────────
+// Groups exhibitions into rows of 2 for useVirtualizer, avoiding DOM nodes for
 // off-screen rows.
 
 const COLUMNS     = 2
 const ROW_HEIGHT  = 240  // px estimate per card row (image ~90 + content ~120 + gap)
 
-function VirtualEventsGrid({
+function VirtualExhibitionsGrid({
   events,
   scrollRef,
+  distances,
 }: {
-  events:    EventCardData[]
+  events:    ExhibitionCardData[]
   scrollRef: React.RefObject<HTMLDivElement>
+  /** Present only in Near-me mode; keyed by exhibition id. */
+  distances?: Map<string, number> | null
 }) {
   const rowCount = Math.ceil(events.length / COLUMNS)
 
@@ -137,7 +143,7 @@ function VirtualEventsGrid({
 
   return (
     <div
-      className="px-4 pb-6 pt-0"
+      className="px-4 pt-0 pb-[calc(var(--nav-h)+1.5rem)]"
       style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
     >
       {virtualizer.getVirtualItems().map((virtualRow) => {
@@ -159,7 +165,11 @@ function VirtualEventsGrid({
           >
             <div className="grid grid-cols-2 gap-3 py-1.5">
               {items.map((event) => (
-                <EventCard key={event.id} event={event} />
+                <ExhibitionCard
+                  key={event.id}
+                  exhibition={event}
+                  distanceM={distances?.get(event.id)}
+                />
               ))}
               {/* Padding cell when last row has only 1 item */}
               {items.length < COLUMNS && <div />}
@@ -176,31 +186,54 @@ function VirtualEventsGrid({
 export default function DiscoverPage() {
   const { city, citySlug } = useCity()
   const { showToast }      = useToast()
+  const [searchParams]     = useSearchParams()
 
   useTitle(
     city ? `Discover in ${city.name}` : 'Discover',
     city
-      ? `Find art events, exhibitions and performances happening in ${city.name}.`
-      : 'Find art events and exhibitions near you.',
+      ? `Exhibitions, performances and talks happening in ${city.name}.`
+      : 'Exhibitions and performances near you.',
   )
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const [search,           setSearch]           = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [dateFilter,       setDateFilter]       = useState<DateFilter>('all')
-  const [view,             setView]             = useState<ViewTab>('events')
+  const [view,             setView]             = useState<ViewTab>(searchParams.get('tab') === 'venues' ? 'venues' : 'onNow')
 
   const debouncedSearch = useDebounce(search, 300)
 
+  // Searching is worth measuring — whether people search at all, and whether
+  // they find anything. The query text itself is never recorded: it is
+  // free-form user input, which is the single most likely place for personal
+  // data to enter analytics. Length and result count answer the question
+  // without carrying the content.
+  useEffect(() => {
+    const q = debouncedSearch.trim()
+    if (q.length < 2) return
+    track('search_performed', { length: q.length, results: filteredCount.current })
+  }, [debouncedSearch])
+
   // ── Data state ────────────────────────────────────────────────────────────
-  const [events,        setEvents]        = useState<EventCardData[]>([])
+  const [events,        setEvents]        = useState<ExhibitionCardData[]>([])
   const [venues,        setVenues]        = useState<VenueCardData[]>([])
-  const [categories,    setCategories]    = useState<CategoryData[]>([])
+  const [artForms,      setArtForms]      = useState<ArtFormData[]>([])
   const [eventsLoading, setEventsLoading] = useState(true)
   const [venuesLoading, setVenuesLoading] = useState(false)
   const [venuesFetched, setVenuesFetched] = useState(false)
 
   // ── Pull-to-refresh state ─────────────────────────────────────────────────
+  // ── Near me ───────────────────────────────────────────────────────────────
+  //
+  // A separate result set rather than a client-side sort of `events`: distance
+  // is computed by PostGIS against the venue coordinates, and the endpoint also
+  // excludes placeholder venues, which have city-centre coordinates and would
+  // otherwise all rank as "200 m away".
+  const { locate, status: locStatus, clear: clearLocation } = useUserLocation()
+  const [nearMe,        setNearMe]        = useState(false)
+  const [nearbyIds,     setNearbyIds]     = useState<Map<string, number> | null>(null)
+  const [nearbyLoading, setNearbyLoading] = useState(false)
+
   const [pullDistance, setPullDistance] = useState(0)
   const [refreshing,   setRefreshing]   = useState(false)
   const touchStartY    = useRef(0)
@@ -208,14 +241,13 @@ export default function DiscoverPage() {
   const PULL_THRESHOLD = 60
 
   // ── Scroll container ref ──────────────────────────────────────────────────
-  const listRef     = useRef<HTMLDivElement>(null)
-  const lastScrollY = useRef(0)
+  const listRef = useRef<HTMLDivElement>(null)
 
   // ── Fetch categories once ─────────────────────────────────────────────────
   useEffect(() => {
-    fetch(`${API}/api/categories`)
+    fetch(`${API}/api/art-forms`)
       .then((r) => r.json())
-      .then((data: CategoryData[]) => setCategories(data))
+      .then((data: ArtFormData[]) => setArtForms(data))
       .catch(() => showToast('Failed to load categories', 'error'))
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -235,13 +267,13 @@ export default function DiscoverPage() {
       setEventsLoading(true)
       try {
         const params = new URLSearchParams()
-        if (selectedCategory) params.set('category', selectedCategory)
+        if (selectedCategory) params.set('artForm', selectedCategory)
         const { dateFrom, dateTo } = getDateRange(dateFilter)
         if (dateFrom) params.set('dateFrom', dateFrom)
         if (dateTo)   params.set('dateTo',   dateTo)
 
-        const data: EventCardData[] = await fetch(
-          `${API}/api/cities/${citySlug}/events?${params}`,
+        const data: ExhibitionCardData[] = await fetch(
+          `${API}/api/cities/${citySlug}/exhibitions?${params}`,
         ).then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`)
           return r.json()
@@ -251,7 +283,7 @@ export default function DiscoverPage() {
         setEvents(data)
         listRef.current?.scrollTo({ top: 0 })
       } catch {
-        showToast('Failed to load events. Check your connection.', 'error')
+        showToast(connectionError("what's on"), 'error')
       } finally {
         setEventsLoading(false)
       }
@@ -279,7 +311,7 @@ export default function DiscoverPage() {
         setVenues(data)
         setVenuesFetched(true)
       })
-      .catch(() => showToast('Failed to load venues. Check your connection.', 'error'))
+      .catch(() => showToast(connectionError('venues'), 'error'))
       .finally(() => setVenuesLoading(false))
   }, [view, venuesFetched, citySlug, showToast])
 
@@ -311,32 +343,72 @@ export default function DiscoverPage() {
     setPullDistance(0)
   }, [pullDistance, fetchEvents, view, citySlug])
 
-  // ── Scroll direction → hide/show bottom nav ────────────────────────────────
-  const handleScroll = useCallback(() => {
-    const el = listRef.current
-    if (!el) return
-    const y = el.scrollTop
-    const THRESHOLD = 8
-
-    if (y > lastScrollY.current + THRESHOLD) {
-      window.dispatchEvent(new CustomEvent('nav:hide'))
-    } else if (y < lastScrollY.current - THRESHOLD) {
-      window.dispatchEvent(new CustomEvent('nav:show'))
-    }
-    lastScrollY.current = y
-  }, [])
-
-  // Show nav again when leaving page
-  useEffect(() => {
-    return () => { window.dispatchEvent(new CustomEvent('nav:show')) }
-  }, [])
-
   // ── Client-side search filter ─────────────────────────────────────────────
+  const toggleNearMe = useCallback(async () => {
+    if (nearMe) {
+      setNearMe(false)
+      setNearbyIds(null)
+      clearLocation()
+      return
+    }
+
+    setNearbyLoading(true)
+    try {
+      const at = await locate()
+      if (!at) {
+        // Distinguish refusal from failure: the fix differs, and "try again"
+        // is useless advice for a denied permission.
+        showToast(
+          locStatus === 'denied'
+            ? 'Location is off for ArtBeat. Enable it in Settings.'
+            : 'Could not get your location.',
+          'error',
+        )
+        return
+      }
+
+      const params = new URLSearchParams({
+        lat: String(at.lat), lng: String(at.lng), radius: '5',
+      })
+      const rows: { id: string; distanceM: number }[] = await fetch(
+        `${API}/api/cities/${citySlug}/exhibitions/nearby?${params}`,
+      ).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+
+      setNearbyIds(new Map(rows.map((r) => [r.id, r.distanceM])))
+      setNearMe(true)
+      // Result count, never the coordinates: where the user is, is not ours.
+      track('near_me_used', { results: rows.length })
+      listRef.current?.scrollTo({ top: 0 })
+    } catch {
+      showToast('Could not load what is near you.', 'error')
+    } finally {
+      setNearbyLoading(false)
+    }
+  }, [nearMe, locate, locStatus, citySlug, showToast, clearLocation])
+
   const filteredEvents = useMemo(() => {
-    if (!debouncedSearch.trim()) return events
-    const q = debouncedSearch.toLowerCase()
-    return events.filter((e) => e.title.toLowerCase().includes(q))
-  }, [events, debouncedSearch])
+    let list = events
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase()
+      list = list.filter((e) => e.title.toLowerCase().includes(q))
+    }
+    if (nearMe && nearbyIds) {
+      // Intersect rather than replace, so the art-form and date filters still
+      // apply — "near me" narrows the current view, it does not escape it.
+      list = list
+        .filter((e) => nearbyIds.has(e.id))
+        .sort((a, b) => nearbyIds.get(a.id)! - nearbyIds.get(b.id)!)
+    }
+    return list
+  }, [events, debouncedSearch, nearMe, nearbyIds])
+
+  // Read by the search event above. A ref rather than state: this feeds
+  // telemetry only, and making it state would re-render on every keystroke.
+  const filteredCount = useRef(0)
+  filteredCount.current = filteredEvents.length
 
   const filteredVenues = useMemo(() => {
     if (!debouncedSearch.trim()) return venues
@@ -346,8 +418,8 @@ export default function DiscoverPage() {
     )
   }, [venues, debouncedSearch])
 
-  const resultCount = view === 'events' ? filteredEvents.length : filteredVenues.length
-  const isLoading   = view === 'events' ? eventsLoading : venuesLoading
+  const resultCount = view === 'onNow' ? filteredEvents.length : filteredVenues.length
+  const isLoading   = view === 'onNow' ? eventsLoading : venuesLoading
 
   const handleTabChange = (tab: ViewTab) => {
     setView(tab)
@@ -357,13 +429,13 @@ export default function DiscoverPage() {
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-4rem)] bg-gray-50">
+    <div className="flex flex-col bg-gray-50 h-dvh">
 
       {/* ── STICKY HEADER ───────────────────────────────────────────── */}
-      <div className="sticky top-0 z-20 bg-white border-b border-gray-100 shadow-sm">
+      <div className="sticky top-0 z-20 bg-white border-b border-gray-100 shadow-sm" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
 
         {/* Top row: title + city + search */}
-        <div className="px-4 pt-4 pb-3 flex items-center gap-3">
+        <div className="px-4 pt-3 pb-3 flex items-center gap-3">
           <h1 className="text-xl font-bold text-gray-900 shrink-0">Discover</h1>
           <CitySelector variant="row" />
 
@@ -380,8 +452,8 @@ export default function DiscoverPage() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search events…"
-              aria-label="Search events"
+              placeholder="Search what's on…"
+              aria-label="Search what's on"
               className="w-full pl-9 pr-9 py-2 text-sm bg-gray-100 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
             {search && (
@@ -399,7 +471,7 @@ export default function DiscoverPage() {
         </div>
 
         {/* Category pills */}
-        <div role="group" aria-label="Filter by category" className="flex gap-2 px-4 pb-3 overflow-x-auto scrollbar-none">
+        <div role="group" aria-label="Filter by medium" className="flex gap-2 px-4 pb-3 overflow-x-auto scrollbar-none">
           <button
             onClick={() => setSelectedCategory(null)}
             aria-pressed={selectedCategory === null}
@@ -411,7 +483,7 @@ export default function DiscoverPage() {
           >
             All
           </button>
-          {categories.map((cat) => {
+          {artForms.map((cat) => {
             const active = selectedCategory === cat.slug
             return (
               <button
@@ -449,22 +521,46 @@ export default function DiscoverPage() {
           ))}
         </div>
 
+        {/* Near me. Only on What's on: the nearby endpoint returns exhibitions,
+            and the Venues tab has no distance to sort by. */}
+        {view === 'onNow' && (
+          <div className="px-4 pb-2.5">
+            <button
+              onClick={toggleNearMe}
+              aria-pressed={nearMe}
+              disabled={nearbyLoading}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors min-h-[36px] disabled:opacity-60 ${
+                nearMe ? 'bg-brand-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+              </svg>
+              {nearbyLoading ? 'Locating…' : nearMe ? 'Near me · 5 km' : 'Near me'}
+            </button>
+            {nearMe && (
+              <span className="ml-2 text-xs text-gray-500">closest first</span>
+            )}
+          </div>
+        )}
+
         {/* Tab toggle + result count */}
         <div className="flex items-center justify-between px-4 pb-3">
           <div role="tablist" aria-label="View mode" className="flex bg-gray-100 rounded-xl p-1 gap-1">
-            {(['events', 'venues'] as ViewTab[]).map((tab) => (
+            {([['onNow', "What's on"], ['venues', 'Venues']] as [ViewTab, string][]).map(([tab, label]) => (
               <button
                 key={tab}
                 role="tab"
                 aria-selected={view === tab}
                 onClick={() => handleTabChange(tab)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all min-h-[36px] ${
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all min-h-[36px] ${
                   view === tab
                     ? 'bg-white text-gray-900 shadow-sm'
                     : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
-                {tab}
+                {label}
               </button>
             ))}
           </div>
@@ -474,7 +570,7 @@ export default function DiscoverPage() {
             ) : (
               <>
                 <span className="text-gray-700 font-bold">{resultCount}</span>{' '}
-                {view === 'events' ? 'event' : 'venue'}{resultCount !== 1 ? 's' : ''}
+                {view === 'onNow' ? 'on now' : `venue${resultCount !== 1 ? 's' : ''}`}
                 {city ? ` in ${city.name}` : ''}
               </>
             )}
@@ -486,7 +582,6 @@ export default function DiscoverPage() {
       <div
         ref={listRef}
         className="flex-1 overflow-y-auto relative"
-        onScroll={handleScroll}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -496,14 +591,18 @@ export default function DiscoverPage() {
 
         {/* Loading skeletons */}
         {isLoading && (
-          view === 'events' ? <SkeletonGrid count={6} /> : <SkeletonList count={4} />
+          view === 'onNow' ? <SkeletonGrid count={6} /> : <SkeletonList count={4} />
         )}
 
-        {/* Events — virtualised 2-column grid */}
-        {!isLoading && view === 'events' && (
+        {/* What's on — virtualised 2-column grid */}
+        {!isLoading && view === 'onNow' && (
           filteredEvents.length === 0
-            ? <EmptyState view="events" />
-            : <VirtualEventsGrid events={filteredEvents} scrollRef={listRef} />
+            ? <EmptyState view="onNow" />
+            : <VirtualExhibitionsGrid
+                events={filteredEvents}
+                scrollRef={listRef}
+                distances={nearMe ? nearbyIds : null}
+              />
         )}
 
         {/* Venues — standard list (rarely has 100+ items) */}

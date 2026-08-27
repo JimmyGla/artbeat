@@ -1,0 +1,139 @@
+{
+  "$comment": [
+    "Curated permanent collections — deliberately NOT scraped.",
+    "",
+    "A permanent collection is the most valuable content in the app: always",
+    "accurate, never expires, and no broken selector can take it away. Listing",
+    "sites do not advertise it because it is not news, so crawling will never",
+    "find it. Written once by hand, it also gives the app a content floor for",
+    "when every scraper is down.",
+    "",
+    "`venue` must match a Venue name in the database (case-insensitive). Run",
+    "`npm run db:seed-permanent` after editing. The script is idempotent and",
+    "matches on venue + title, so correcting text here updates the row rather",
+    "than duplicating it.",
+    "",
+    "Descriptions are intentionally short and factual. Anything promotional",
+    "reads as filler next to scraped listings."
+  ],
+  "collections": [
+    {
+      "venue": "Pinacoteca di Brera",
+      "title": "Pinacoteca di Brera — permanent collection",
+      "description": "Thirty-eight rooms of Italian painting from the 13th to the 20th century, including Raphael's Marriage of the Virgin, Mantegna's Lamentation of Christ and Piero della Francesca's Montefeltro Altarpiece.",
+      "artForms": ["painting"],
+      "admission": "PAID",
+      "priceCents": 1500
+    },
+    {
+      "venue": "Museo del Novecento",
+      "title": "Museo del Novecento — permanent collection",
+      "description": "Twentieth-century Italian art across four floors, from Futurism and Boccioni through Arte Povera, arranged chronologically in the Palazzo dell'Arengario overlooking the Duomo.",
+      "artForms": ["painting", "sculpture"],
+      "admission": "PAID",
+      "priceCents": 500
+    },
+    {
+      "venue": "GAM – Galleria d'Arte Moderna",
+      "title": "Galleria d'Arte Moderna — permanent collection",
+      "description": "Nineteenth-century Lombard painting and sculpture in the neoclassical Villa Reale, including works by Canova, Hayez and Medardo Rosso.",
+      "artForms": ["painting", "sculpture"],
+      "admission": "FREE"
+    },
+    {
+      "venue": "Museo Poldi Pezzoli",
+      "title": "Museo Poldi Pezzoli — house museum collection",
+      "description": "A 19th-century collector's house preserved intact: Renaissance painting, arms and armour, clocks, glass and textiles, including Piero del Pollaiolo's Portrait of a Young Woman.",
+      "artForms": ["painting", "textile"],
+      "admission": "PAID",
+      "priceCents": 1400
+    },
+    {
+      "venue": "Museo Bagatti Valsecchi",
+      "title": "Museo Bagatti Valsecchi — house museum collection",
+      "description": "A Renaissance-revival residence assembled by two brothers in the 1880s, with its 15th- and 16th-century furnishings, ceramics and paintings still in domestic arrangement.",
+      "artForms": ["painting"],
+      "admission": "PAID",
+      "priceCents": 1200
+    },
+    {
+      "venue": "Castello Sforzesco",
+      "title": "Castello Sforzesco museums — permanent collections",
+      "description": "Several museums inside the Sforza castle, including the Museum of Ancient Art with Michelangelo's unfinished Rondanini Pietà, the Pinacoteca, and collections of furniture, musical instruments and applied arts.",
+      "artForms": ["sculpture", "painting"],
+      "admission": "PAID",
+      "priceCents": 500
+    },
+    {
+      "venue": "MUDEC – Museo delle Culture",
+      "title": "MUDEC — permanent collection",
+      "description": "Milan's municipal collection of non-European art and objects, roughly two hundred works tracing how the city acquired and interpreted other cultures.",
+      "artForms": ["sculpture", "textile"],
+      "admission": "PAID",
+      "priceCents": 500
+    },
+    {
+      "venue": "Triennale Milano",
+      "title": "Museo del Design Italiano",
+      "description": "A permanent survey of Italian design from 1946 onwards, several hundred objects arranged chronologically in the Palazzo dell'Arte.",
+      "artForms": ["design"],
+      "admission": "PAID",
+      "priceCents": 1200
+    },
+    {
+      "venue": "ADI Design Museum",
+      "title": "Compasso d'Oro collection",
+      "description": "The complete archive of the Compasso d'Oro award — the objects that defined Italian industrial design since 1954, shown alongside the drawings and prototypes behind them.",
+      "artForms": ["design"],
+      "admission": "PAID",
+      "priceCents": 1400
+    },
+    {
+      "venue": "Fondazione Prada",
+      "title": "Fondazione Prada — permanent installations",
+      "description": "Long-term works within the former distillery, including Robert Gober's and Louise Bourgeois's rooms in the Haunted House and Thomas Demand's Processo Grottesco.",
+      "artForms": ["installation", "sculpture"],
+      "admission": "PAID",
+      "priceCents": 1500
+    },
+    {
+      "venue": "Pirelli HangarBicocca",
+      "title": "The Seven Heavenly Palaces",
+      "description": "Anselm Kiefer's seven concrete towers, installed permanently in the former industrial hall since 2004, with five large paintings added in 2015.",
+      "artForms": ["installation", "sculpture"],
+      "admission": "FREE"
+    },
+    {
+      "venue": "Museo Diocesano Carlo Maria Martini",
+      "title": "Museo Diocesano — permanent collection",
+      "description": "Religious art from the Ambrosian diocese, from early Christian fragments to 18th-century painting, in the cloisters of Sant'Eustorgio.",
+      "artForms": ["painting", "sculpture"],
+      "admission": "PAID",
+      "priceCents": 800
+    },
+    {
+      "venue": "Museo Nazionale Scienza e Tecnologia",
+      "title": "Leonardo da Vinci galleries",
+      "description": "Italy's largest science and technology museum, including the Leonardo gallery of models built from his codices, plus transport, energy and communications collections.",
+      "artForms": ["design", "drawing"],
+      "admission": "PAID",
+      "priceCents": 1000
+    },
+    {
+      "venue": "Villa Necchi Campiglio",
+      "title": "Villa Necchi Campiglio",
+      "description": "A 1930s rationalist villa by Piero Portaluppi kept as its owners left it, with the Claudia Gian Ferrari and Alighiero de' Micheli collections of 20th-century painting and 18th-century decorative arts.",
+      "artForms": ["architecture", "painting"],
+      "admission": "PAID",
+      "priceCents": 1400
+    },
+    {
+      "venue": "Palazzo Citterio",
+      "title": "Jesi and Vitali collections",
+      "description": "The modern wing of the Grande Brera, holding the Jesi and Vitali bequests of 20th-century Italian art — Modigliani, Morandi, Boccioni — alongside spaces by Stirling.",
+      "artForms": ["painting", "sculpture"],
+      "admission": "PAID",
+      "priceCents": 1200
+    }
+  ]
+}

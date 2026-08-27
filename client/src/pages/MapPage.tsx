@@ -9,25 +9,33 @@ import {
   useMapEvents,
 } from 'react-leaflet'
 import L from 'leaflet'
+import { useUserLocation } from '../hooks/useUserLocation'
 import { useCity } from '../context/CityContext'
 import { useToast } from '../context/ToastContext'
 import CitySelector from '../components/CitySelector'
 import { useTitle } from '../hooks/useTitle'
-import { API_BASE } from '../lib/api'
+import { API_BASE, connectionError } from '../lib/api'
+import {
+  accentColor, admissionLabel, dateLabel, formatLabel,
+  type Admission, type RunKind,
+} from '../lib/format'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface CategoryData { id: string; name: string; slug: string; color: string }
+interface ArtFormData { id: string; name: string; slug: string; color: string }
 
-interface EventData {
-  id:        string
-  title:     string
-  startDate: string
-  endDate?:  string | null
-  price:     number | null
-  imageUrl?: string | null
-  category:  { name: string; color: string; slug: string }
-  venue:     { name: string; lat: number; lng: number; type: string }
+interface ExhibitionData {
+  id:         string
+  title:      string
+  run:        RunKind
+  format:     string
+  startsOn:   string | null
+  endsOn:     string | null
+  admission:  Admission
+  priceCents: number | null
+  imageUrl?:  string | null
+  artForms:   { name: string; slug: string; color: string }[]
+  venue:      { id: string; name: string; lat: number; lng: number; kind: string; isPlaceholder?: boolean }
 }
 
 interface VenueGroup {
@@ -35,8 +43,8 @@ interface VenueGroup {
   venueName:  string
   lat:        number
   lng:        number
-  nextEvent:  EventData
-  eventCount: number
+  nextExhibition: ExhibitionData
+  exhibitionCount: number
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -64,10 +72,6 @@ const userLocationIcon = L.divIcon({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
 // ─── Sub-components (inside MapContainer) ─────────────────────────────────────
 
 function MapController({ center, zoom }: { center: [number, number]; zoom: number }) {
@@ -90,7 +94,7 @@ const MapPage = () => {
 
   useTitle(
     city ? `Map — ${city.name}` : 'Map',
-    'Explore art events on an interactive map.',
+    'Explore exhibitions and performances on an interactive map.',
   )
 
   // ── Local map view state ───────────────────────────────────────────────
@@ -98,8 +102,8 @@ const MapPage = () => {
   const [mapZoom,   setMapZoom]   = useState(13)
 
   // ── Data ──────────────────────────────────────────────────────────────
-  const [events,     setEvents]     = useState<EventData[]>([])
-  const [categories, setCategories] = useState<CategoryData[]>([])
+  const [events,     setEvents]     = useState<ExhibitionData[]>([])
+  const [artForms,   setArtForms]   = useState<ArtFormData[]>([])
   const [loading,    setLoading]    = useState(true)
 
   // ── Filters ───────────────────────────────────────────────────────────
@@ -110,6 +114,7 @@ const MapPage = () => {
   // ── UI state ──────────────────────────────────────────────────────────
   const [selectedGroup, setSelectedGroup] = useState<VenueGroup | null>(null)
   const [userLocation,  setUserLocation]  = useState<[number, number] | null>(null)
+  const { locate, status: locStatus } = useUserLocation()
 
   // ── Draggable bottom sheet ────────────────────────────────────────────
   const [sheetDragY,    setSheetDragY]    = useState(0)
@@ -131,50 +136,68 @@ const MapPage = () => {
     setSelectedGroup(null)
 
     Promise.all([
-      fetch(`${API}/api/cities/${citySlug}/events`).then((r) => {
+      fetch(`${API}/api/cities/${citySlug}/exhibitions`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
       }),
-      fetch(`${API}/api/categories`).then((r) => r.json()),
+      fetch(`${API}/api/art-forms`).then((r) => r.json()),
     ])
-      .then(([evts, cats]: [EventData[], CategoryData[]]) => {
+      .then(([evts, forms]: [ExhibitionData[], ArtFormData[]]) => {
         setEvents(evts)
-        setCategories(cats)
+        setArtForms(forms)
       })
-      .catch(() => showToast('Failed to load map data. Check your connection.', 'error'))
+      .catch(() => showToast(connectionError('map data'), 'error'))
       .finally(() => setLoading(false))
   }, [citySlug, showToast])
 
   // ── Derived venue groups ──────────────────────────────────────────────
   const venueGroups = useMemo<VenueGroup[]>(() => {
     const filtered = events.filter((e) => {
-      if (freeOnly && e.price !== null) return false
-      if (selectedCategories.length > 0 && !selectedCategories.includes(e.category.slug)) return false
+      // Events whose venue could not be resolved carry city-centre coordinates
+      // as a placeholder.  Pinning them would put a cluster on the city centre
+      // that claims to be real locations — worse than omitting them.  They are
+      // still listed in Discover.
+      if (e.venue.isPlaceholder) return false
+      // "Free" means free, not "no price recorded" — an unlisted price is not
+      // evidence of free entry.
+      if (freeOnly && e.admission !== 'FREE') return false
+      if (selectedCategories.length > 0 &&
+          !e.artForms.some((a) => selectedCategories.includes(a.slug))) return false
       return true
     })
-    const map = new Map<string, { events: EventData[]; venue: EventData['venue'] }>()
+    const map = new Map<string, { events: ExhibitionData[]; venue: ExhibitionData['venue'] }>()
     filtered.forEach((event) => {
       const key = `${event.venue.name}|${event.venue.lat}|${event.venue.lng}`
       if (!map.has(key)) map.set(key, { events: [event], venue: event.venue })
       else               map.get(key)!.events.push(event)
     })
     return Array.from(map.entries()).map(([key, { events: evts, venue }]) => {
-      const sorted = [...evts].sort((a, b) => +new Date(a.startDate) - +new Date(b.startDate))
-      return { key, venueName: venue.name, lat: venue.lat, lng: venue.lng, nextEvent: sorted[0], eventCount: evts.length }
+      const sorted = [...evts].sort((a, b) => {
+        // A permanent collection is always on, so it leads.
+        if (!a.startsOn) return -1
+        if (!b.startsOn) return 1
+        return +new Date(a.startsOn) - +new Date(b.startsOn)
+      })
+      return { key, venueName: venue.name, lat: venue.lat, lng: venue.lng, nextExhibition: sorted[0], exhibitionCount: evts.length }
     })
   }, [events, selectedCategories, freeOnly])
 
   // ── Handlers ──────────────────────────────────────────────────────────
-  const handleLocateMe = useCallback(() => {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude]
-        setUserLocation(coords); setMapCenter(coords); setMapZoom(16)
-      },
-      () => showToast('Could not get your location', 'error'),
-      { enableHighAccuracy: true },
-    )
-  }, [showToast])
+  // Permission handling lives in useUserLocation so this and Discover's
+  // "Near me" cannot drift into treating a denial differently.
+  const handleLocateMe = useCallback(async () => {
+    const at = await locate()
+    if (!at) {
+      showToast(
+        locStatus === 'denied' ? 'Location is off for ArtBeat. Enable it in Settings.'
+                               : 'Could not get your location',
+        'error',
+      )
+      return
+    }
+    const coords: [number, number] = [at.lat, at.lng]
+    setUserLocation(coords); setMapCenter(coords); setMapZoom(16)
+  }, [locate, locStatus, showToast])
 
   const toggleCategory = useCallback((slug: string) => {
     setSelectedCategories((prev) => prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug])
@@ -217,7 +240,7 @@ const MapPage = () => {
   // ─────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="relative w-full overflow-hidden" style={{ height: 'calc(100dvh - 4rem)' }}>
+    <div className="fixed inset-0 z-0 overflow-hidden">
 
       {/* ── MAP ─────────────────────────────────────────────────────── */}
       <MapContainer
@@ -236,7 +259,7 @@ const MapPage = () => {
           <Marker
             key={group.key}
             position={[group.lat, group.lng]}
-            icon={venueIcon(group.nextEvent.category.color)}
+            icon={venueIcon(accentColor(group.nextExhibition.artForms))}
             eventHandlers={{ click: () => handlePinClick(group) }}
           />
         ))}
@@ -244,7 +267,7 @@ const MapPage = () => {
       </MapContainer>
 
       {/* ── TOP BAR ─────────────────────────────────────────────────── */}
-      <div className="absolute top-3 left-0 right-0 px-3 z-[1000] flex items-start gap-2 pointer-events-none">
+      <div className="absolute left-0 right-0 px-3 z-[1000] flex items-start gap-2 pointer-events-none" style={{ top: 'calc(0.5rem + env(safe-area-inset-top, 0px))' }}>
         <div className="pointer-events-auto">
           <CitySelector variant="pill" />
         </div>
@@ -275,17 +298,22 @@ const MapPage = () => {
 
       {/* ── FILTER PANEL ────────────────────────────────────────────── */}
       <div
-        className={`absolute left-3 right-3 z-[1000] transition-all duration-300 ease-out ${
-          filterOpen ? 'top-16 opacity-100 pointer-events-auto' : 'top-12 opacity-0 pointer-events-none'
-        }`}
+        className="absolute left-3 right-3 z-[1000] transition-all duration-300 ease-out"
+        style={{
+          top: filterOpen
+            ? `calc(env(safe-area-inset-top, 0px) + 4rem)`
+            : `calc(env(safe-area-inset-top, 0px) + 3rem)`,
+          opacity:        filterOpen ? 1 : 0,
+          pointerEvents:  filterOpen ? 'auto' : 'none',
+        }}
         role="region"
         aria-label="Filters"
         aria-hidden={!filterOpen}
       >
         <div className="bg-white rounded-2xl shadow-xl p-4">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5">Category</p>
-          <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="Category filters">
-            {categories.map((cat) => {
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5">Medium</p>
+          <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="Medium filters">
+            {artForms.map((cat) => {
               const active = selectedCategories.includes(cat.slug)
               return (
                 <button
@@ -306,7 +334,7 @@ const MapPage = () => {
           </div>
 
           <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-            <span className="text-sm font-medium text-gray-700" id="free-toggle-label">Free events only</span>
+            <span className="text-sm font-medium text-gray-700" id="free-toggle-label">Free entry only</span>
             <button
               onClick={() => setFreeOnly((f) => !f)}
               role="switch"
@@ -324,7 +352,8 @@ const MapPage = () => {
       <button
         onClick={handleLocateMe}
         aria-label="Centre map on my location"
-        className="absolute bottom-5 right-4 z-[1000] w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-50 active:scale-95 transition-all"
+        className="absolute right-4 z-[1000] w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-50 active:scale-95 transition-all"
+        style={{ bottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))' }}
       >
         <svg className="w-5 h-5 text-brand-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
@@ -379,7 +408,7 @@ const MapPage = () => {
         }}
         role={selectedGroup ? 'dialog' : undefined}
         aria-modal={selectedGroup ? true : undefined}
-        aria-label={selectedGroup ? `Event at ${selectedGroup.venueName}` : undefined}
+        aria-label={selectedGroup ? `Exhibition at ${selectedGroup.venueName}` : undefined}
       >
         {selectedGroup && (
           <>
@@ -394,10 +423,10 @@ const MapPage = () => {
               <div className="w-10 h-1 rounded-full bg-gray-200" />
             </div>
 
-            {/* Event image */}
-            {selectedGroup.nextEvent.imageUrl ? (
+            {/* Exhibition image */}
+            {selectedGroup.nextExhibition.imageUrl ? (
               <img
-                src={selectedGroup.nextEvent.imageUrl}
+                src={selectedGroup.nextExhibition.imageUrl}
                 alt=""
                 loading="lazy"
                 width="600"
@@ -407,7 +436,7 @@ const MapPage = () => {
             ) : (
               <div
                 className="w-full h-28 mt-2 flex items-center justify-center"
-                style={{ backgroundColor: selectedGroup.nextEvent.category.color + '18' }}
+                style={{ backgroundColor: accentColor(selectedGroup.nextExhibition.artForms) + '18' }}
                 aria-hidden="true"
               >
                 <span className="text-5xl select-none">🎨</span>
@@ -415,19 +444,19 @@ const MapPage = () => {
             )}
 
             {/* Content */}
-            <div className="px-5 pt-4 pb-6">
+            <div className="px-5 pt-4 pb-[calc(var(--nav-h)+1.5rem)]">
               <span
                 className="inline-block text-xs font-semibold px-2.5 py-1 rounded-full mb-2"
                 style={{
-                  backgroundColor: selectedGroup.nextEvent.category.color + '20',
-                  color:           selectedGroup.nextEvent.category.color,
+                  backgroundColor: accentColor(selectedGroup.nextExhibition.artForms) + '20',
+                  color:           accentColor(selectedGroup.nextExhibition.artForms),
                 }}
               >
-                {selectedGroup.nextEvent.category.name}
+                {selectedGroup.nextExhibition.artForms[0]?.name ?? formatLabel(selectedGroup.nextExhibition.format)}
               </span>
 
               <h3 className="text-lg font-bold text-gray-900 leading-snug mb-2">
-                {selectedGroup.nextEvent.title}
+                {selectedGroup.nextExhibition.title}
               </h3>
 
               <div className="flex items-center gap-2 text-sm text-gray-500 mb-1.5">
@@ -436,8 +465,11 @@ const MapPage = () => {
                   <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" />
                   <line x1="3"  y1="10" x2="21" y2="10" />
                 </svg>
-                {fmtDate(selectedGroup.nextEvent.startDate)}
-                {selectedGroup.nextEvent.endDate && ` – ${fmtDate(selectedGroup.nextEvent.endDate)}`}
+                {dateLabel({
+                  run:      selectedGroup.nextExhibition.run,
+                  startsOn: selectedGroup.nextExhibition.startsOn,
+                  endsOn:   selectedGroup.nextExhibition.endsOn,
+                })}
               </div>
 
               <div className="flex items-center gap-2 text-sm text-gray-500 mb-5">
@@ -446,30 +478,32 @@ const MapPage = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
                 <span className="truncate">{selectedGroup.venueName}</span>
-                {selectedGroup.eventCount > 1 && (
+                {selectedGroup.exhibitionCount > 1 && (
                   <span className="shrink-0 text-xs bg-gray-100 px-1.5 py-0.5 rounded-full text-gray-600">
-                    +{selectedGroup.eventCount - 1} more
+                    +{selectedGroup.exhibitionCount - 1} more
                   </span>
                 )}
               </div>
 
               <div className="flex items-center gap-3">
                 <div className="shrink-0">
-                  {selectedGroup.nextEvent.price == null ? (
-                    <span className="text-sm font-bold text-emerald-600">Free</span>
-                  ) : (
-                    <span className="text-sm font-bold text-gray-800">€{selectedGroup.nextEvent.price}</span>
-                  )}
+                  <span className={`text-sm font-bold ${
+                    selectedGroup.nextExhibition.admission === 'FREE'    ? 'text-emerald-600'
+                    : selectedGroup.nextExhibition.admission === 'UNKNOWN' ? 'text-gray-400'
+                    : 'text-gray-800'
+                  }`}>
+                    {admissionLabel(selectedGroup.nextExhibition.admission, selectedGroup.nextExhibition.priceCents)}
+                  </span>
                 </div>
                 <button
-                  onClick={() => navigate(`/event/${selectedGroup.nextEvent.id}`)}
+                  onClick={() => navigate(`/exhibition/${selectedGroup.nextExhibition.id}`)}
                   className="flex-1 py-3 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-xl text-sm transition-colors active:scale-[0.98]"
                 >
                   View details
                 </button>
                 <button
                   onClick={closeSheet}
-                  aria-label="Close event details"
+                  aria-label="Close details"
                   className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 transition-colors"
                 >
                   <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">

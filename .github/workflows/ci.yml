@@ -1,0 +1,81 @@
+name: CI
+
+# Lives at the repo root on purpose. The previous copy was at
+# artbeat-deploy/.github/workflows/ci.yml, which GitHub never runs — Actions
+# only reads workflows from `.github/workflows` at the root of the repository.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: server — typecheck + tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    env:
+      # `prisma generate` reads the datasource URL from the schema even though
+      # it never connects. A dummy value keeps it from failing on a fresh
+      # checkout; no test in this job touches a database.
+      DATABASE_URL: postgresql://user:pass@localhost:5432/db?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # Covers src/ AND scripts/ — the scraper was previously excluded from
+      # typechecking entirely, which is how a venue-resolution bug survived.
+      - name: Typecheck (src + scripts)
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+  client:
+    name: client — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    env:
+      # The client reads these at build time; Vite inlines them. Dummy values
+      # are fine because CI only checks that it compiles.
+      VITE_SUPABASE_URL: https://example.supabase.co
+      VITE_SUPABASE_ANON_KEY: ci-placeholder
+      VITE_API_URL: http://localhost:3001
+      VITE_PROD_API_URL: http://localhost:3001
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # A build is the real check here: it catches missing env handling and
+      # broken imports that `tsc --noEmit` alone will not.
+      - name: Build
+        run: npm run build

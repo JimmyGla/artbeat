@@ -1,9 +1,7 @@
 import { useState, FormEvent } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { API_BASE } from '../lib/api'
-
-const API = API_BASE
+import { signInWithGoogle } from '../lib/oauth'
 
 export default function LoginPage() {
   const navigate                = useNavigate()
@@ -30,8 +28,12 @@ export default function LoginPage() {
     }
   }
 
-  function handleGoogleLogin() {
-    window.location.href = `${API}/api/auth/google`
+  async function handleGoogleLogin() {
+    setError('')
+    // Native opens the system browser and returns via the io.artbeat.app://
+    // deep link; web keeps the ordinary same-origin redirect. See lib/oauth.
+    const { error: oauthError } = await signInWithGoogle()
+    if (oauthError) setError(oauthError)
   }
 
   return (

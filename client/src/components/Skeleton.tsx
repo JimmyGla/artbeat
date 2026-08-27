@@ -53,7 +53,7 @@ export function SkeletonImage({
   )
 }
 
-// ─── SkeletonCard — matches EventCard proportions ────────────────────────────
+// ─── SkeletonCard — matches ExhibitionCard proportions ────────────────────────────
 
 export function SkeletonCard({ className = '' }: { className?: string }) {
   return (

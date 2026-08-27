@@ -3,33 +3,18 @@ import { useEffect } from 'react'
 const APP_NAME = 'ArtBeat'
 
 /**
- * Sets the document title, meta description, and canonical link for the
- * current page.  Call at the top of each page component.
+ * Sets the document title for the current page.  Call at the top of each
+ * page component.
+ *
+ * This app is app-first: inside the Capacitor WebView the title is never
+ * shown, so there is no canonical-link or meta-description handling here.
+ * The title is still set so the web build keeps sane browser tabs.
  *
  * @param title       Page-specific title, e.g. "Discover".
- * @param description Optional meta description for the page.
+ * @param _description Retained for call-site compatibility; unused.
  */
-export function useTitle(title: string, description?: string): void {
+export function useTitle(title: string, _description?: string): void {
   useEffect(() => {
-    // ── <title> ────────────────────────────────────────────────────────
     document.title = `${title} · ${APP_NAME}`
-
-    // ── <meta name="description"> ─────────────────────────────────────
-    let meta = document.querySelector<HTMLMetaElement>('meta[name="description"]')
-    if (!meta) {
-      meta = document.createElement('meta')
-      meta.name = 'description'
-      document.head.appendChild(meta)
-    }
-    meta.content = description ?? `${title} — discover art events near you on ${APP_NAME}.`
-
-    // ── <link rel="canonical"> ────────────────────────────────────────
-    let link = document.querySelector<HTMLLinkElement>('link[rel="canonical"]')
-    if (!link) {
-      link = document.createElement('link')
-      link.rel = 'canonical'
-      document.head.appendChild(link)
-    }
-    link.href = window.location.origin + window.location.pathname
-  }, [title, description])
+  }, [title])
 }

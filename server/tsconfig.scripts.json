@@ -1,0 +1,18 @@
+// The main tsconfig sets `rootDir: ./src` and `include: ["src"]` so that the
+// build output layout stays clean — which also meant `scripts/` (the scraper,
+// the date parser, the venue resolver) was never typechecked at all.  This
+// config covers those files for `npm run typecheck`; it never emits.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"],
+    // The scraper's `page.evaluate()` callbacks are serialised and run inside
+    // the browser, so they legitimately reference `document` / `window` and
+    // need the DOM lib the server build deliberately omits.
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+  },
+  "include": ["scripts"],
+  "exclude": ["node_modules", "dist"]
+}

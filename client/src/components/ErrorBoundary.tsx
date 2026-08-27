@@ -1,4 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from 'react'
+import { reportError } from '../lib/telemetry'
 
 interface Props {
   children: ReactNode
@@ -21,7 +22,14 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('[ErrorBoundary] Uncaught error:', error, info.componentStack)
+    // The recovery screen below tells the user "This has been noted", which was
+    // untrue until this call existed — nothing was reported anywhere.
+    reportError(error, {
+      source: 'react_render',
+      // The component stack is the most useful part of a render error and the
+      // least likely to contain data; scrubbed by reportError regardless.
+      component_stack: (info.componentStack ?? '').slice(0, 300),
+    })
   }
 
   private handleReload = () => {

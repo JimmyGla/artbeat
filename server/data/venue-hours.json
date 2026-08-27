@@ -1,0 +1,37 @@
+{
+  "_readme": [
+    "Hand-entered opening hours, for venues that do not publish machine-readable ones.",
+    "",
+    "Why this file exists: scripts/scrapeHours.ts reads schema.org markup from venue",
+    "websites, and for Milan it returns nothing at all — 13 of 19 sites publish no hours",
+    "markup, 4 return HTTP 403 to our crawler, 2 are unreachable. Run it yourself with",
+    "`npm run hours:scrape -- --dry` to see the current picture.",
+    "",
+    "Nothing in here is guessed. Every entry must be copied from the venue's own site or",
+    "signage, and `source` must be the URL you copied it from. A venue absent from this",
+    "file simply shows no hours in the app, which is the correct outcome — a wrong",
+    "'Open now' sends someone across the city to a locked door.",
+    "",
+    "Format:",
+    "  name    must match the venue name in scripts/venues.ts exactly",
+    "  hours   one entry per weekday that has opening hours; omit closed days entirely",
+    "          days: 0=Sunday .. 6=Saturday, or names like 'Tue'",
+    "          two entries for the same day express a lunch closure",
+    "  source  the page the hours were read from",
+    "  closed  optional YYYY-MM-DD dates the venue is exceptionally shut",
+    "",
+    "Seed with: npm run hours:seed"
+  ],
+
+  "_example": {
+    "name": "Example Museum (delete this entry)",
+    "source": "https://example.org/visit",
+    "hours": [
+      { "days": ["Tue", "Wed", "Thu", "Fri", "Sun"], "opens": "10:00", "closes": "19:30" },
+      { "days": ["Sat"], "opens": "10:00", "closes": "22:30" }
+    ],
+    "closed": ["2026-12-25", "2027-01-01"]
+  },
+
+  "venues": []
+}

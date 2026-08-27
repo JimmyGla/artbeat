@@ -2,17 +2,28 @@ import { Router, Request, Response } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma'
 import { apiError } from '../lib/errors'
-import { getEventsNearPoint } from '../lib/geo'
+import { getExhibitionsNearPoint } from '../lib/geo'
+import { stillOn } from '../lib/eventFilters'
 
 const router = Router()
 
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
 const eventsQuerySchema = z.object({
-  category: z.string().optional(),
+  /** Filter by medium (ArtForm slug) — replaces the old `category` param. */
+  artForm:  z.string().optional(),
   dateFrom: z.coerce.date().optional(),
   dateTo:   z.coerce.date().optional(),
   free:     z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
+  /**
+   * Finished events are excluded by default — a discovery app showing closed
+   * exhibitions is worse than showing fewer.  Opt in with `includeEnded=true`
+   * for archive or debugging views.
+   */
+  includeEnded: z
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .optional(),
@@ -54,7 +65,7 @@ router.get('/', async (_req: Request, res: Response) => {
 
 // ─── GET /api/cities/:slug/events/nearby ─────────────────────────────────────
 
-router.get('/:slug/events/nearby', async (req: Request, res: Response) => {
+router.get(['/:slug/exhibitions/nearby', '/:slug/events/nearby'], async (req: Request, res: Response) => {
   const { slug } = req.params
   const parsed = nearbyQuerySchema.safeParse(req.query)
   if (!parsed.success) {
@@ -63,49 +74,66 @@ router.get('/:slug/events/nearby', async (req: Request, res: Response) => {
   }
   const { lat, lng, radius } = parsed.data
   try {
-    res.json(await getEventsNearPoint(lat, lng, radius, slug))
+    res.json(await getExhibitionsNearPoint(lat, lng, radius, slug))
   } catch (err) {
     console.error(err)
     apiError(res, 500, 'Failed to fetch nearby events')
   }
 })
 
-// ─── GET /api/cities/:slug/events ────────────────────────────────────────────
+// ─── GET /api/cities/:slug/exhibitions ───────────────────────────────────────
+// `/events` stays mounted as a deprecated alias for shipped app builds.
 
-router.get('/:slug/events', async (req: Request, res: Response) => {
+router.get(['/:slug/exhibitions', '/:slug/events'], async (req: Request, res: Response) => {
   const { slug } = req.params
   const parsed = eventsQuerySchema.safeParse(req.query)
   if (!parsed.success) {
     apiError(res, 400, parsed.error.issues.map((i) => i.message).join('; '))
     return
   }
-  const { category, dateFrom, dateTo, free } = parsed.data
+  const { artForm, dateFrom, dateTo, free, includeEnded } = parsed.data
 
   const city = await prisma.city.findUnique({ where: { slug } })
   if (!city) { apiError(res, 404, `City "${slug}" not found`); return }
 
   try {
-    const events = await prisma.event.findMany({
+    const events = await prisma.exhibition.findMany({
       where: {
         venue: { city: { slug } },
-        ...(category && { category: { slug: category } }),
-        ...(dateFrom  && { startDate: { gte: dateFrom } }),
-        ...(dateTo    && { startDate: { lte: dateTo   } }),
-        ...(free      && { price: null }),
+        ...(artForm  && { artForms: { some: { artForm: { slug: artForm } } } }),
+        ...(dateFrom  && { startsOn: { gte: dateFrom } }),
+        ...(dateTo    && { startsOn: { lte: dateTo   } }),
+        // Free now means free, not "no price recorded".
+        ...(free      && { admission: 'FREE' as const }),
+        ...(includeEnded ? {} : stillOn()),
       },
       select: {
-        id:        true,
-        title:     true,
-        startDate: true,
-        endDate:   true,
-        price:     true,
-        imageUrl:  true,
-        category: { select: { name: true, color: true, slug: true } },
-        venue:    { select: { name: true, lat: true, lng: true, type: true } },
+        id:         true,
+        title:      true,
+        run:        true,
+        format:     true,
+        startsOn:   true,
+        endsOn:     true,
+        admission:  true,
+        priceCents: true,
+        imageUrl:   true,
+        // `isPlaceholder` is reported rather than filtered: this one endpoint
+        // feeds both Discover (which should list these events) and the map
+        // (which must not pin them). The caller decides.
+        venue:      { select: { id: true, name: true, lat: true, lng: true, kind: true, isPlaceholder: true } },
+        artForms:   { select: { artForm: { select: { name: true, slug: true, color: true } } } },
       },
-      orderBy: { startDate: 'asc' },
+      // Permanent runs have no start date, so they sort last under `asc`
+      // regardless — order by run first to make that explicit rather than
+      // accidental.
+      orderBy: [{ run: 'asc' }, { startsOn: 'asc' }],
     })
-    res.json(events)
+
+    // Flatten the join table: the client should not have to know it exists.
+    res.json(events.map((e) => ({
+      ...e,
+      artForms: e.artForms.map((j) => j.artForm),
+    })))
   } catch (err) {
     console.error(err)
     apiError(res, 500, 'Failed to fetch events')
@@ -120,9 +148,22 @@ router.get('/:slug/venues', async (req: Request, res: Response) => {
   if (!city) { apiError(res, 404, `City "${slug}" not found`); return }
 
   try {
+    // Same predicate the events list uses — see lib/eventFilters.
+    const stillOnFilter = stillOn()
+
     const venues = await prisma.venue.findMany({
-      where: { city: { slug } },
-      include: { _count: { select: { events: { where: { startDate: { gte: new Date() } } } } } },
+      // Placeholders are a bookkeeping device for events with no confirmed
+      // location — not real places, so they never appear in the venue list.
+      where: { city: { slug }, isPlaceholder: false },
+      include: {
+        _count: { select: { exhibitions: { where: stillOnFilter } } },
+        exhibitions: {
+          where:   { ...stillOnFilter, imageUrl: { not: null } },
+          select:  { imageUrl: true },
+          orderBy: { startsOn: 'asc' },
+          take:    1,
+        },
+      },
       orderBy: { name: 'asc' },
     })
     res.json(venues.map((v) => ({
@@ -132,10 +173,10 @@ router.get('/:slug/venues', async (req: Request, res: Response) => {
       address:            v.address,
       lat:                v.lat,
       lng:                v.lng,
-      type:               v.type,
-      imageUrl:           v.imageUrl,
+      kind:               v.kind,
+      imageUrl:           v.imageUrl ?? v.exhibitions[0]?.imageUrl ?? null,
       website:            v.website,
-      upcomingEventCount: v._count.events,
+      upcomingEventCount: v._count.exhibitions,
     })))
   } catch (err) {
     console.error(err)

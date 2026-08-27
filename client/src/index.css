@@ -3,6 +3,15 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* Space occupied by the fixed BottomNav, including the home-indicator
+       inset it pads itself with.  Use this instead of hardcoding `4rem` so
+       content clears the nav on notched and non-notched devices alike:
+         height:         calc(100dvh - var(--nav-h))
+         padding-bottom: calc(var(--nav-h) + 1.5rem)   ← breathing room */
+    --nav-h: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
   }

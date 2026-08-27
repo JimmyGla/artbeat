@@ -3,3 +3,8 @@ dist/
 .env
 .DS_Store
 *.local
+
+# JetBrains / Android Studio project settings. Generated per-machine by the IDE
+# and rewritten on open, so tracking them just produces churn in every diff.
+.idea/
+*.iml

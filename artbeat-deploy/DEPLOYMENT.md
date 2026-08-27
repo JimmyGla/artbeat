@@ -47,12 +47,30 @@ You have two options: **Railway** (simpler, one platform) or **Supabase's own Po
 
 Supabase already provisions a PostgreSQL instance with PostGIS enabled for every project.
 
-1. In your Supabase project, go to **Settings → Database → Connection String → URI**.
-2. Choose **Transaction** mode (port 6543) for stateless services like Railway/Render:
+1. In your Supabase project, go to **Settings → Database** and pick
+   **Connection pooler** — *not* the direct connection shown by default.
+
+   The direct host (`db.<ref>.supabase.co`) has **no IPv4 address**; it resolves
+   to IPv6 only, and an IPv4 add-on is a paid extra. Most laptops, CI runners
+   and container hosts have no IPv6 route, so the direct URI fails with
+   "Can't reach database server" no matter how correct the password is. Use the
+   pooler host, which is IPv4-reachable.
+
+2. Prefer **Session mode** (port **5432** on the *pooler* host):
    ```
-   postgresql://postgres:[PASSWORD]@aws-0-eu-west-1.pooler.supabase.com:6543/postgres
+   postgresql://postgres.<project-ref>:[PASSWORD]@aws-1-<region>.pooler.supabase.com:5432/postgres
    ```
-3. Append `?pgbouncer=true&connection_limit=1` to the URL when using a connection pooler.
+   Note the username carries the project ref (`postgres.<project-ref>`) — the
+   pooler needs it to route to your project, and a plain `postgres` username
+   fails to authenticate.
+
+3. Transaction mode (port 6543) also works but does not support prepared
+   statements, so Prisma needs `?pgbouncer=true` appended and **cannot run
+   migrations through it**. Session mode avoids both problems; use it unless
+   you have a specific reason not to.
+
+4. If the password contains reserved URL characters, percent-encode them
+   (`*` → `%2A`, `@` → `%40`).
 
 > **Note:** PostGIS is pre-installed on all Supabase Postgres instances.
 

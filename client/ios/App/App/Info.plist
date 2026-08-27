@@ -47,6 +47,33 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<!-- Deep-link scheme for the OAuth return trip.  Google refuses to run
+	     sign-in inside an app WebView (disallowed_useragent), so the flow opens
+	     in the system browser and comes back through this scheme.  Must match
+	     the redirect URL whitelisted in Supabase → Authentication → URL
+	     Configuration, and OAUTH_REDIRECT in src/lib/oauth.ts. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>io.artbeat.app</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>io.artbeat.app</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Allows plain-HTTP requests to LAN addresses (e.g. the dev server at
+	     192.168.x.x:3001).  Scoped to the local network only — it does NOT
+	     permit arbitrary HTTP to the public internet.  Safe to keep, since a
+	     production build should talk to an HTTPS host anyway. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>ArtBeat uses your location to show nearby art events and venues on the map.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
