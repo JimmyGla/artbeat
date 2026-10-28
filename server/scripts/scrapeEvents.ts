@@ -102,7 +102,9 @@ async function extractJsonLd(page: Page): Promise<Record<string, unknown> | null
             return item as Record<string, unknown>
           }
         }
-      } catch {}
+      } catch {
+        // Malformed JSON-LD block — try the next one
+      }
     }
     return null
   })
