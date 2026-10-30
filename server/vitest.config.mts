@@ -13,6 +13,13 @@ export default defineConfig({
       'scripts/**/*.test.ts',
       'scripts/**/__tests__/**/*.test.ts',
     ],
+    // Placeholders so modules that build clients at import time can load.
+    // Port 1 is closed, so nothing can reach a real database.
+    env: {
+      SUPABASE_URL:              'http://localhost:54321',
+      SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+      DATABASE_URL:              'postgresql://test:test@127.0.0.1:1/test',
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text'],

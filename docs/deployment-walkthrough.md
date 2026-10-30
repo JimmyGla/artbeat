@@ -1,5 +1,7 @@
 # ArtBeat — Deployment Guide
 
+> **Older long-form guide.** [DEPLOY.md](../DEPLOY.md) is the current short path and wins wherever the two disagree. This file is kept for the platform signup and OAuth walkthroughs.
+
 This guide walks through deploying ArtBeat from scratch on free-tier cloud services.
 
 **Stack overview**
@@ -156,14 +158,6 @@ npm run prisma:seed
 
 Render doesn't have a one-off job runner on the free tier. Use the local seed method above, pointing `DATABASE_URL` at the Render/Supabase database.
 
-### Via the Docker entrypoint (docker-compose)
-
-```bash
-SEED_DB=true docker compose up --build
-```
-
-The entrypoint script writes a flag file to prevent re-seeding on subsequent boots.
-
 ### Manually via Prisma Studio
 
 ```bash
@@ -212,15 +206,19 @@ Add `http://localhost:5173/auth/callback` to Supabase's allowed redirect URLs du
 ## 6 · Running locally with Docker Compose
 
 ```bash
-# 1. Copy and configure env files
+# 1. Copy and configure env files (compose reads server/.env)
 cp server/.env.example server/.env
 # Edit server/.env — fill in SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
 
 # 2. Start the stack (Postgres + server)
-docker compose up --build
+docker compose up --build -d
 
-# 3. Seed on first run
-SEED_DB=true docker compose up --build
+# 3. Migrate and seed from the host — the image runs the API only
+cd server
+export DATABASE_URL="postgresql://artbeat:artbeat@localhost:5432/artbeat?schema=public"
+npx prisma migrate deploy
+npm run prisma:seed
+cd ..
 
 # 4. Run the client separately (Vite HMR doesn't work in Docker for dev)
 cp client/.env.example client/.env
@@ -257,10 +255,4 @@ The server will be available at `http://localhost:3001` and the client at `http:
 
 ## 8 · CI/CD
 
-A GitHub Actions workflow at `.github/workflows/ci.yml` runs on every push to `main`:
-
-- TypeScript type-check (`tsc --noEmit`) for client and server
-- ESLint on both packages
-- Vitest unit tests for both packages
-
-See the workflow file for details. To add deployment steps, extend the workflow with Railway's or Vercel's official GitHub Actions after the test jobs pass.
+See [DEPLOY.md](../DEPLOY.md#what-is-already-prepared) and `.github/workflows/ci.yml`. CI only checks; nothing deploys from it yet.

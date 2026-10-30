@@ -1,7 +1,7 @@
 # Deploying ArtBeat
 
 Current, verified-where-possible checklist. The long-form walkthrough in
-[artbeat-deploy/DEPLOYMENT.md](artbeat-deploy/DEPLOYMENT.md) covers platform
+[docs/deployment-walkthrough.md](docs/deployment-walkthrough.md) covers platform
 signup in more detail; this file is the accurate short path and takes
 precedence where the two disagree.
 
@@ -14,13 +14,14 @@ session, so they can't be automated.
 
 | Piece | State |
 |---|---|
-| `.github/workflows/ci.yml` | Typecheck + tests on push/PR. Verified locally. |
+| `.github/workflows/ci.yml` | On push/PR: typecheck, ESLint, tests, production dependency audit, client build. Also builds the API image and boots it (see below). |
 | `.github/workflows/refresh-data.yml` | Nightly scrape → repair → audit. Needs `DATABASE_URL` secret. |
-| `server/Dockerfile` | Multi-stage, non-root, API-only. **Unverified — Docker isn't installed on this machine.** |
+| `server/Dockerfile` | Multi-stage, non-root, API-only. CI builds it and smoke-tests `/health`, `/ready` and the Prisma CLI on every PR. |
 | `server/.dockerignore` | Excludes `scripts/`, `logs/`, `.env`. |
+| `docker-compose.yml` | Local Postgres + PostGIS and the API image. Reads `server/.env`; migrate and seed from the host (see the file's header). |
 | `GET /health` | Liveness. No DB access, safe for restart probes. |
 | `GET /ready` | Readiness. Verifies Postgres. Verified against live Supabase. |
-| `npm test` (server) | 55 tests over date/venue/price/description parsing. |
+| `npm test` | Server: parsers, filters, opening hours, and the app's health/ready/404/CORS behaviour. Client: reminders, telemetry. |
 
 Playwright was moved to `devDependencies` — the API never imports it, and it
 was pulling ~15MB plus a Chromium download into the production image.
@@ -110,12 +111,11 @@ on failure.
 
 ## Known gaps
 
-- **The Dockerfile has never been built.** Docker isn't available here. Expect
-  to iterate on the `node_modules/.prisma` copy step in particular — Prisma's
-  generated client is not a normal dependency and the runtime stage installs
-  production deps fresh rather than copying the dev tree.
-- **No linting.** `server` has no `lint` script and `client`'s "lint" is just
-  `tsc --noEmit`. CI reflects that honestly rather than pretending otherwise.
+- **The image is only checked in CI.** The smoke test boots it without a
+  database, so it proves Prisma's engine loads and the CLI is present, not that
+  migrations apply. Run `/ready` against a real database after the first deploy.
+- **ESLint warnings are allowed.** Errors fail CI; six `no-explicit-any`
+  warnings remain in the server and are reported, not enforced.
 - **Two of five scrape sources are degraded** (`triennale` 0 links, `mudec`
   20 links → 1 event). Run `npm run db:audit` after deploying to see current
   coverage.
