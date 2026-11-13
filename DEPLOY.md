@@ -15,11 +15,13 @@ session, so they can't be automated.
 | Piece | State |
 |---|---|
 | `.github/workflows/ci.yml` | On push/PR: typecheck, ESLint, tests, production dependency audit, client build. Also builds the API image and boots it (see below). |
+| `.github/workflows/deploy.yml` | After CI passes on `main`: migrate, trigger Render, wait for the new commit on `/health`, check `/ready`. Needs the setup in section 2. |
+| `.github/workflows/uptime.yml` | Every 30 min: `/health` and `/ready`. Fails (and emails you) when either is down; also keeps the free Supabase project from pausing. Needs the `API_URL` variable. |
 | `.github/workflows/refresh-data.yml` | Nightly scrape → repair → audit. Needs `DATABASE_URL` secret. |
 | `server/Dockerfile` | Multi-stage, non-root, API-only. CI builds it and smoke-tests `/health`, `/ready` and the Prisma CLI on every PR. |
 | `server/.dockerignore` | Excludes `scripts/`, `logs/`, `.env`. |
 | `docker-compose.yml` | Local Postgres + PostGIS and the API image. Reads `server/.env`; migrate and seed from the host (see the file's header). |
-| `GET /health` | Liveness. No DB access, safe for restart probes. |
+| `GET /health` | Liveness. No DB access, safe for restart probes. Reports the deployed `commit`. |
 | `GET /ready` | Readiness. Verifies Postgres. Verified against live Supabase. |
 | `npm test` | Server: parsers, filters, opening hours, and the app's health/ready/404/CORS behaviour. Client: reminders, telemetry. |
 
@@ -39,26 +41,49 @@ Already on Supabase. The only trap is the connection string:
 
 ---
 
-## 2 · Deploy the API **[you]**
+## 2 · Deploy the API **[you, once]**
 
-The Dockerfile is portable, so any container host works (Fly.io, Railway,
-Render, Cloud Run). Set:
+The API runs on Render (`artbeat-server`). Deploys go through GitHub Actions
+(`.github/workflows/deploy.yml`), never through Render's own auto-deploy, so
+that migrations always run first and only code that passed CI ships.
 
-```
-DATABASE_URL   = <supabase pooler URI, session mode>
-CLIENT_URL     = <your web origin, for CORS>
-PORT           = <injected by most platforms>
-NODE_ENV       = production
-```
+**On Render** (service → Settings / Environment):
 
-Then:
+1. **Auto-Deploy: Off.** Otherwise Render deploys on every push to `main`,
+   before migrations and even when CI fails.
+2. **Health Check Path:** `/health`. Not `/ready`: a database blip would
+   restart-loop the service.
+3. **Deploy Hook:** copy the URL. It's a secret; anyone with it can deploy.
+4. **Environment:**
+   ```
+   DATABASE_URL              = <supabase pooler URI, session mode>
+   CLIENT_URL                = <your web origin, for CORS>
+   SUPABASE_URL              = https://<project-ref>.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY = <service-role key>
+   ADMIN_SECRET              = <openssl rand -hex 32>
+   NODE_ENV                  = production
+   ```
+   `PORT` and `RENDER_GIT_COMMIT` are set by Render.
 
-- **Release/pre-deploy command:** `npx prisma migrate deploy`
-  Not in the Dockerfile on purpose — two instances booting at once would race
-  on the migration table.
-- **Health probe:** `/health`. Do **not** point it at `/ready`; a transient
-  Postgres blip would restart-loop the container.
-- **Verify:** `curl https://<host>/ready` → `{"status":"ready","database":"up"}`
+**On GitHub** (repo → Settings → Secrets and variables → Actions):
+
+| Kind | Name | Value |
+|---|---|---|
+| Secret | `DATABASE_URL` | Same pooler URI. Also used by the nightly refresh. |
+| Secret | `RENDER_DEPLOY_HOOK_URL` | The deploy hook URL |
+| Variable | `API_URL` | `https://artbeat-server.onrender.com` |
+
+Then run **Actions → Deploy API → Run workflow** once. It migrates, deploys
+`main`, and fails loudly if `/health` doesn't show the new commit within 20
+minutes or `/ready` can't reach the database.
+
+From then on, every merge to `main` deploys itself once CI is green.
+
+- **Rollback:** Render dashboard → Deploys → pick an earlier one → Rollback.
+  Migrations aren't rolled back, which is why they must stay compatible with
+  the previous release (CLAUDE.md).
+- **Verify by hand:** `curl https://<host>/health` shows the live `commit`;
+  `curl https://<host>/ready` → `{"status":"ready","database":"up"}`.
 
 CORS already allows `capacitor://localhost` and `https://localhost`, so the
 native app works without extra configuration. Set `CLIENT_URL` for the web
@@ -99,9 +124,9 @@ rotate it under **Settings → API**.
 
 ## 5 · Turn on the scheduled refresh **[you]**
 
-Add repository secret `DATABASE_URL` (same pooler URI) under
-**Settings → Secrets and variables → Actions**. The workflow fails fast with a
-clear message if it's missing rather than half-running.
+Uses the same `DATABASE_URL` repository secret as the deploy (section 2). The
+workflow fails fast with a clear message if it's missing rather than
+half-running.
 
 Then trigger it manually once (**Actions → Refresh data → Run workflow**) to
 confirm before trusting the 04:15 UTC schedule. Logs upload as an artifact even

@@ -1,0 +1,101 @@
+name: Deploy API
+
+# The only way the API reaches production:
+#   CI green on main → migrate the database → tell Render to deploy → wait
+#   until /health reports the new commit and /ready says the database is up.
+#
+# Migrations run BEFORE the new code, so every migration must still work with
+# the code currently live (add columns/tables first, remove them in a later
+# release). See CLAUDE.md.
+#
+# One-time setup (DEPLOY.md, section 2):
+#   - Render: turn Auto-Deploy OFF, create a Deploy Hook.
+#   - Repo secrets: DATABASE_URL (Supabase pooler, session mode),
+#     RENDER_DEPLOY_HOOK_URL.
+#   - Repo variable: API_URL (e.g. https://artbeat-server.onrender.com).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once; never cancel one halfway through a migration.
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: migrate → deploy → verify
+    # workflow_run fires for failed CI too; only deploy what passed, and only
+    # pushes to main (not PRs that happen to target it).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      API_URL: ${{ vars.API_URL }}
+      # The commit CI tested, not whatever main points at now.
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Check configuration
+        working-directory: .
+        run: |
+          missing=0
+          for v in DATABASE_URL RENDER_DEPLOY_HOOK_URL API_URL; do
+            if [ -z "${!v}" ]; then echo "::error::$v is not set (see DEPLOY.md, section 2)"; missing=1; fi
+          done
+          exit $missing
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL" > /dev/null
+
+      # Render builds the latest commit on its branch, so if main moves on
+      # mid-deploy this run times out and the next run deploys the newer one.
+      - name: Wait for the new commit to go live
+        run: |
+          for i in $(seq 1 60); do
+            body=$(curl -fsS -m 20 "$API_URL/health" || true)
+            live=$(echo "$body" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')
+            echo "attempt $i: live=${live:-none}"
+            if [ "$live" = "$SHA" ]; then echo "Deployed $SHA"; exit 0; fi
+            sleep 20
+          done
+          echo "::error::$SHA was not live after 20 minutes (still ${live:-unreachable}). Check the Render dashboard."
+          exit 1
+
+      - name: Check the database is reachable
+        run: |
+          code=$(curl -s -m 30 -o /dev/null -w '%{http_code}' "$API_URL/ready")
+          if [ "$code" != 200 ]; then
+            echo "::error::/ready returned $code — the API is live but can't reach the database."
+            exit 1
+          fi
+          echo "/ready OK"

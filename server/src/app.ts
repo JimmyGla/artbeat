@@ -39,9 +39,14 @@ app.use(express.urlencoded({ extended: true }))
  * Liveness — is the process up?  Must not touch the database: a hosting
  * platform restarts containers that fail this, and killing the API because
  * Postgres blipped turns a brief outage into a restart loop.
+ *
+ * `commit` is the deployed git SHA (Render sets RENDER_GIT_COMMIT; elsewhere
+ * set GIT_COMMIT). The deploy workflow polls it to know the new code is live.
  */
+const COMMIT = process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT ?? 'unknown'
+
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok' })
+  res.json({ status: 'ok', commit: COMMIT })
 })
 
 /**
