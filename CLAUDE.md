@@ -45,6 +45,10 @@ Details and one-time setup: `DEPLOY.md`.
   enum rename into DROP + CREATE, deleting the data. See
   `server/prisma/migrations/*rename*` for the pattern.
 - **Never edit an applied migration.** Add a new one.
+- **Every new table gets `ENABLE ROW LEVEL SECURITY` in its migration**, with
+  no policies. Supabase serves `public` tables over its own data API to anyone
+  with the anon key; the app doesn't use that API (Prisma connects as the
+  owner, which RLS doesn't restrict), so it stays shut.
 - **The `prisma` CLI is a production dependency** on purpose: the release step
   runs `npx prisma migrate deploy` in the image.
 - **Secrets never go in the client.** Only `VITE_*` values reach the bundle,
