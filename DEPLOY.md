@@ -15,8 +15,8 @@ session, so they can't be automated.
 | Piece | State |
 |---|---|
 | `.github/workflows/ci.yml` | On push/PR: typecheck, ESLint, tests, production dependency audit, client build. Also builds the API image and boots it (see below). |
-| `.github/workflows/deploy.yml` | After CI passes on `main`: migrate, trigger Render, wait for the new commit on `/health`, check `/ready`. Needs the setup in section 2. |
-| `.github/workflows/uptime.yml` | Every 30 min: `/health` and `/ready`. Fails (and emails you) when either is down; also keeps the free Supabase project from pausing. Needs the `API_URL` variable. |
+| Render auto-deploy | After CI passes on `main`, Render builds, runs `prisma migrate deploy`, and switches over once `/health` answers. Needs the two settings in section 2. |
+| `.github/workflows/uptime.yml` | Every 30 min: `/health` and `/ready`. Fails (and emails you) when either is down; also keeps the free Supabase project from pausing. No setup; runs once it's on `main`. |
 | `.github/workflows/refresh-data.yml` | Nightly scrape → repair → audit. Needs `DATABASE_URL` secret. |
 | `server/Dockerfile` | Multi-stage, non-root, API-only. CI builds it and smoke-tests `/health`, `/ready` and the Prisma CLI on every PR. |
 | `server/.dockerignore` | Excludes `scripts/`, `logs/`, `.env`. |
@@ -43,18 +43,24 @@ Already on Supabase. The only trap is the connection string:
 
 ## 2 · Deploy the API **[you, once]**
 
-The API runs on Render (`artbeat-server`). Deploys go through GitHub Actions
-(`.github/workflows/deploy.yml`), never through Render's own auto-deploy, so
-that migrations always run first and only code that passed CI ships.
+The API runs on Render (`artbeat-server`, native Node runtime, root dir
+`server`). Render deploys `main` itself, but only after GitHub CI passes. Its
+build command ends with `npx prisma migrate deploy`, so migrations run before
+the new code goes live, and the old instance keeps serving if the build or
+the health check fails.
+
+Build command (set in the dashboard):
+`npm ci && npm run build && npx prisma generate && npx prisma migrate deploy`.
+Start command: `node dist/index.js`. The `Dockerfile` is checked in CI but not
+used by Render.
 
 **On Render** (service → Settings / Environment):
 
-1. **Auto-Deploy: Off.** Otherwise Render deploys on every push to `main`,
-   before migrations and even when CI fails.
+1. **Auto-Deploy: On, trigger "After CI Checks Pass".** "On Commit" would ship
+   code even when CI fails.
 2. **Health Check Path:** `/health`. Not `/ready`: a database blip would
    restart-loop the service.
-3. **Deploy Hook:** copy the URL. It's a secret; anyone with it can deploy.
-4. **Environment:**
+3. **Environment:**
    ```
    DATABASE_URL              = <supabase pooler URI, session mode>
    CLIENT_URL                = <your web origin, for CORS>
@@ -69,15 +75,9 @@ that migrations always run first and only code that passed CI ships.
 
 | Kind | Name | Value |
 |---|---|---|
-| Secret | `DATABASE_URL` | Same pooler URI. Also used by the nightly refresh. |
-| Secret | `RENDER_DEPLOY_HOOK_URL` | The deploy hook URL |
-| Variable | `API_URL` | `https://artbeat-server.onrender.com` |
+| Secret | `DATABASE_URL` | Same pooler URI. Used only by the nightly refresh. |
 
-Then run **Actions → Deploy API → Run workflow** once. It migrates, deploys
-`main`, and fails loudly if `/health` doesn't show the new commit within 20
-minutes or `/ready` can't reach the database.
-
-From then on, every merge to `main` deploys itself once CI is green.
+Every merge to `main` then deploys itself once CI is green.
 
 - **Rollback:** Render dashboard → Deploys → pick an earlier one → Rollback.
   Migrations aren't rolled back, which is why they must stay compatible with

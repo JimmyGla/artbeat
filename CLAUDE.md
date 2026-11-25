@@ -23,9 +23,10 @@ and a Docker build + boot of the API image.
 
 ## How code reaches users
 
-- **API:** merge to `main` → CI → `.github/workflows/deploy.yml` applies
-  migrations, triggers Render, and waits for `/health` to report the new
-  commit. Nothing else deploys. Never deploy from a laptop.
+- **API:** merge to `main` → CI passes → Render auto-deploys (trigger "After
+  CI Checks Pass"). Its build command runs `prisma migrate deploy` before the
+  new code goes live; `/health` reports the live `commit`. Nothing else
+  deploys. Never deploy from a laptop.
 - **Database:** Supabase (Postgres 17, PostGIS). Production `DATABASE_URL` is
   the **pooler** URI, session mode; the direct host is IPv6-only.
 - **Data:** `.github/workflows/refresh-data.yml` scrapes nightly.
