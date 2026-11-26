@@ -1,7 +1,7 @@
 # Deploying ArtBeat
 
 Current, verified-where-possible checklist. The long-form walkthrough in
-[artbeat-deploy/DEPLOYMENT.md](artbeat-deploy/DEPLOYMENT.md) covers platform
+[docs/deployment-walkthrough.md](docs/deployment-walkthrough.md) covers platform
 signup in more detail; this file is the accurate short path and takes
 precedence where the two disagree.
 
@@ -14,13 +14,16 @@ session, so they can't be automated.
 
 | Piece | State |
 |---|---|
-| `.github/workflows/ci.yml` | Typecheck + tests on push/PR. Verified locally. |
+| `.github/workflows/ci.yml` | On push/PR: typecheck, ESLint, tests, production dependency audit, client build. Also builds the API image and boots it (see below). |
+| Render auto-deploy | After CI passes on `main`, Render builds, runs `prisma migrate deploy`, and switches over once `/health` answers. Needs the two settings in section 2. |
+| `.github/workflows/uptime.yml` | Every 30 min: `/health` and `/ready`. Fails (and emails you) when either is down; also keeps the free Supabase project from pausing. No setup; runs once it's on `main`. |
 | `.github/workflows/refresh-data.yml` | Nightly scrape → repair → audit. Needs `DATABASE_URL` secret. |
-| `server/Dockerfile` | Multi-stage, non-root, API-only. **Unverified — Docker isn't installed on this machine.** |
+| `server/Dockerfile` | Multi-stage, non-root, API-only. CI builds it and smoke-tests `/health`, `/ready` and the Prisma CLI on every PR. |
 | `server/.dockerignore` | Excludes `scripts/`, `logs/`, `.env`. |
-| `GET /health` | Liveness. No DB access, safe for restart probes. |
+| `docker-compose.yml` | Local Postgres + PostGIS and the API image. Reads `server/.env`; migrate and seed from the host (see the file's header). |
+| `GET /health` | Liveness. No DB access, safe for restart probes. Reports the deployed `commit`. |
 | `GET /ready` | Readiness. Verifies Postgres. Verified against live Supabase. |
-| `npm test` (server) | 55 tests over date/venue/price/description parsing. |
+| `npm test` | Server: parsers, filters, opening hours, and the app's health/ready/404/CORS behaviour. Client: reminders, telemetry. |
 
 Playwright was moved to `devDependencies` — the API never imports it, and it
 was pulling ~15MB plus a Chromium download into the production image.
@@ -38,26 +41,49 @@ Already on Supabase. The only trap is the connection string:
 
 ---
 
-## 2 · Deploy the API **[you]**
+## 2 · Deploy the API **[you, once]**
 
-The Dockerfile is portable, so any container host works (Fly.io, Railway,
-Render, Cloud Run). Set:
+The API runs on Render (`artbeat-server`, native Node runtime, root dir
+`server`). Render deploys `main` itself, but only after GitHub CI passes. Its
+build command ends with `npx prisma migrate deploy`, so migrations run before
+the new code goes live, and the old instance keeps serving if the build or
+the health check fails.
 
-```
-DATABASE_URL   = <supabase pooler URI, session mode>
-CLIENT_URL     = <your web origin, for CORS>
-PORT           = <injected by most platforms>
-NODE_ENV       = production
-```
+Build command (set in the dashboard):
+`npm ci && npm run build && npx prisma generate && npx prisma migrate deploy`.
+Start command: `node dist/index.js`. The `Dockerfile` is checked in CI but not
+used by Render.
 
-Then:
+**On Render** (service → Settings / Environment):
 
-- **Release/pre-deploy command:** `npx prisma migrate deploy`
-  Not in the Dockerfile on purpose — two instances booting at once would race
-  on the migration table.
-- **Health probe:** `/health`. Do **not** point it at `/ready`; a transient
-  Postgres blip would restart-loop the container.
-- **Verify:** `curl https://<host>/ready` → `{"status":"ready","database":"up"}`
+1. **Auto-Deploy: On, trigger "After CI Checks Pass".** "On Commit" would ship
+   code even when CI fails.
+2. **Health Check Path:** `/health`. Not `/ready`: a database blip would
+   restart-loop the service.
+3. **Environment:**
+   ```
+   DATABASE_URL              = <supabase pooler URI, session mode>
+   CLIENT_URL                = <your web origin, for CORS>
+   SUPABASE_URL              = https://<project-ref>.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY = <service-role key>
+   ADMIN_SECRET              = <openssl rand -hex 32>
+   NODE_ENV                  = production
+   ```
+   `PORT` and `RENDER_GIT_COMMIT` are set by Render.
+
+**On GitHub** (repo → Settings → Secrets and variables → Actions):
+
+| Kind | Name | Value |
+|---|---|---|
+| Secret | `DATABASE_URL` | Same pooler URI. Used only by the nightly refresh. |
+
+Every merge to `main` then deploys itself once CI is green.
+
+- **Rollback:** Render dashboard → Deploys → pick an earlier one → Rollback.
+  Migrations aren't rolled back, which is why they must stay compatible with
+  the previous release (CLAUDE.md).
+- **Verify by hand:** `curl https://<host>/health` shows the live `commit`;
+  `curl https://<host>/ready` → `{"status":"ready","database":"up"}`.
 
 CORS already allows `capacitor://localhost` and `https://localhost`, so the
 native app works without extra configuration. Set `CLIENT_URL` for the web
@@ -98,9 +124,9 @@ rotate it under **Settings → API**.
 
 ## 5 · Turn on the scheduled refresh **[you]**
 
-Add repository secret `DATABASE_URL` (same pooler URI) under
-**Settings → Secrets and variables → Actions**. The workflow fails fast with a
-clear message if it's missing rather than half-running.
+Uses the same `DATABASE_URL` repository secret as the deploy (section 2). The
+workflow fails fast with a clear message if it's missing rather than
+half-running.
 
 Then trigger it manually once (**Actions → Refresh data → Run workflow**) to
 confirm before trusting the 04:15 UTC schedule. Logs upload as an artifact even
@@ -110,12 +136,11 @@ on failure.
 
 ## Known gaps
 
-- **The Dockerfile has never been built.** Docker isn't available here. Expect
-  to iterate on the `node_modules/.prisma` copy step in particular — Prisma's
-  generated client is not a normal dependency and the runtime stage installs
-  production deps fresh rather than copying the dev tree.
-- **No linting.** `server` has no `lint` script and `client`'s "lint" is just
-  `tsc --noEmit`. CI reflects that honestly rather than pretending otherwise.
+- **The image is only checked in CI.** The smoke test boots it without a
+  database, so it proves Prisma's engine loads and the CLI is present, not that
+  migrations apply. Run `/ready` against a real database after the first deploy.
+- **ESLint warnings are allowed.** Errors fail CI; six `no-explicit-any`
+  warnings remain in the server and are reported, not enforced.
 - **Two of five scrape sources are degraded** (`triennale` 0 links, `mudec`
   20 links → 1 event). Run `npm run db:audit` after deploying to see current
   coverage.

@@ -1,0 +1,58 @@
+# ─── ArtBeat — Local stack ───────────────────────────────────────────────────
+#
+# Postgres + PostGIS and the API image, the same image CI builds.
+#
+#   cp server/.env.example server/.env      # required; fill in SUPABASE_*
+#   docker compose up --build -d
+#
+# The image runs the API only (see server/Dockerfile), so apply migrations and
+# seed from the host, against the published port:
+#
+#   cd server
+#   export DATABASE_URL="postgresql://artbeat:artbeat@localhost:5432/artbeat?schema=public"
+#   npx prisma migrate deploy
+#   npm run prisma:seed
+#
+# Then check: curl http://localhost:3001/ready
+
+volumes:
+  postgres_data:
+
+services:
+
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER:     artbeat
+      POSTGRES_PASSWORD: artbeat
+      POSTGRES_DB:       artbeat
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Enables PostGIS on first start
+      - ./docker/init-postgis.sql:/docker-entrypoint-initdb.d/init-postgis.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artbeat -d artbeat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  server:
+    build:
+      context: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    # SUPABASE_*, CLIENT_URL and the rest come from server/.env
+    env_file:
+      - path: ./server/.env
+        required: true
+    # Overrides server/.env so the API talks to the db container
+    environment:
+      DATABASE_URL: postgresql://artbeat:artbeat@db:5432/artbeat?schema=public

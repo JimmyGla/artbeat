@@ -8,13 +8,18 @@
 # ─── Stage 1: build ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
+# Prisma detects the OpenSSL version from the `openssl` binary. Without it,
+# `native` falls back to the OpenSSL 1.1 engine, which Alpine's libssl3 can't
+# load — the first query then fails at runtime.
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 
 # Manifests first so the dependency layer caches independently of source.
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# `npm ci` needs devDependencies here — tsc and prisma are both dev-only.
+# `npm ci` needs devDependencies here — tsc is dev-only.
 RUN npm ci
 
 # Prisma's query engine is platform-specific; generate inside the image that
@@ -30,8 +35,8 @@ RUN npm run build
 FROM node:20-alpine AS runner
 
 # dumb-init reaps zombies and forwards SIGTERM so the graceful-shutdown
-# handler in src/index.ts actually fires.
-RUN apk add --no-cache dumb-init
+# handler in src/index.ts actually fires. openssl: see the builder stage.
+RUN apk add --no-cache dumb-init openssl
 
 ENV NODE_ENV=production
 WORKDIR /app
@@ -64,4 +69,6 @@ ENTRYPOINT ["dumb-init", "--"]
 
 # Migrations are deliberately NOT run here. Two instances starting at once
 # would race; run `npx prisma migrate deploy` as a release/pre-deploy step.
+# The prisma CLI is a production dependency so that command uses the
+# project's pinned version instead of downloading the latest one.
 CMD ["node", "dist/index.js"]

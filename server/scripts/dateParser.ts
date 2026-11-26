@@ -72,12 +72,12 @@ interface SinglePattern {
 const SINGLE_PATTERNS: SinglePattern[] = [
   // DD/MM/YYYY or DD-MM-YYYY  ← JS would wrongly treat as MM/DD
   {
-    re: /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/,
+    re: /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/,
     parse: ([, d, m, y]) => makeDate(+y, +m - 1, +d),
   },
   // DD/MM/YY
   {
-    re: /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/,
+    re: /^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/,
     parse: ([, d, m, y]) => makeDate(2000 + +y, +m - 1, +d),
   },
   // "10 marzo 2025"  or  "10 mar 2025"

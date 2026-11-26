@@ -14,9 +14,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The default token only needs to read the repo.
+permissions:
+  contents: read
+
 jobs:
   server:
-    name: server — typecheck + tests
+    name: server — typecheck + lint + tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -45,11 +49,58 @@ jobs:
       - name: Typecheck (src + scripts)
         run: npm run typecheck
 
+      # Errors fail the job; `any` warnings are reported but allowed for now.
+      - name: Lint (src + scripts)
+        run: npm run lint
+
       - name: Unit tests
         run: npm test
 
+      # Production deps only: dev tools never reach the image. High and
+      # critical advisories fail the job.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  # Builds the production image and boots it. Nothing is pushed anywhere.
+  server-image:
+    name: server — Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build --tag artbeat-server:ci server
+
+      # /health needs no database. /ready runs a real query against a closed
+      # port, so it must answer 503 — and in doing so loads Prisma's query
+      # engine, which is what breaks when the image has the wrong OpenSSL.
+      - name: Smoke test
+        run: |
+          docker run -d --name api -p 3001:3001 \
+            -e DATABASE_URL=postgresql://ci:ci@127.0.0.1:1/ci \
+            -e SUPABASE_URL=http://localhost:54321 \
+            -e SUPABASE_SERVICE_ROLE_KEY=ci-placeholder \
+            artbeat-server:ci
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:3001/health && break
+            sleep 1
+          done
+          curl -fsS http://localhost:3001/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/ready)" = 503
+          if docker logs api 2>&1 | grep -iE 'libssl|openssl|query engine|Unable to require'; then
+            echo "::error::Prisma's query engine failed to load in the image"
+            exit 1
+          fi
+          # The release step runs `npx prisma migrate deploy` in this image;
+          # --no-install fails if the pinned CLI isn't there.
+          docker exec api npx --no-install prisma --version
+
+      - name: Container logs
+        if: always()
+        run: docker logs api || true
+
   client:
-    name: client — typecheck + build
+    name: client — typecheck + lint + tests + build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -73,7 +124,16 @@ jobs:
       - run: npm ci
 
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       # A build is the real check here: it catches missing env handling and
       # broken imports that `tsc --noEmit` alone will not.

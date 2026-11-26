@@ -1,0 +1,45 @@
+name: Uptime
+
+# Every 30 minutes: is the API up, and can it reach the database?
+#
+# - A failure turns this run red, and GitHub emails whoever last edited this
+#   file's schedule. Make sure that's you, with Actions notifications on.
+# - /ready runs a real query, which also counts as database activity, so the
+#   free Supabase plan doesn't pause the project after a quiet week.
+#
+# GitHub disables scheduled workflows after 60 days without commits to the
+# repo; re-enable it from the Actions tab if that happens. Scheduled workflows
+# only run from the default branch, so this does nothing until it's on main.
+#
+# Also the post-deploy check: Render deploys main once CI passes, and a deploy
+# that can't reach the database shows up here within 30 minutes.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: /health + /ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # Public URL, not a secret. A repo variable API_URL overrides it.
+      API_URL: ${{ vars.API_URL || 'https://artbeat-server.onrender.com' }}
+    steps:
+      - name: Check
+        run: |
+          # Render's free plan sleeps after 15 idle minutes; the first request
+          # can take ~50s while it wakes, so allow for that and retry once.
+          for attempt in 1 2; do
+            health=$(curl -s -m 90 -o /dev/null -w '%{http_code}' "$API_URL/health")
+            [ "$health" = 200 ] && break
+            sleep 10
+          done
+          ready=$(curl -s -m 30 -o /dev/null -w '%{http_code}' "$API_URL/ready")
+          echo "/health → $health, /ready → $ready"
+          if [ "$health" != 200 ]; then echo "::error::API is down (/health → $health)"; exit 1; fi
+          if [ "$ready" != 200 ]; then echo "::error::API is up but can't reach the database (/ready → $ready)"; exit 1; fi

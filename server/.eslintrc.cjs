@@ -2,10 +2,8 @@
 module.exports = {
   root: true,
   parser: '@typescript-eslint/parser',
-  parserOptions: {
-    project: './tsconfig.json',
-    tsconfigRootDir: __dirname,
-  },
+  // No `project`: none of the enabled rules need type information, and src/
+  // and scripts/ live in different tsconfigs (tsc covers types in both).
   plugins: ['@typescript-eslint'],
   extends: [
     'eslint:recommended',

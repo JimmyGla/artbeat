@@ -75,7 +75,7 @@ const KNOWN_EVENTS = new Set([
 /** Scalars only. Rejecting objects here is what stops nested PII arriving. */
 const propValue = z.union([z.string().max(200), z.number(), z.boolean(), z.null()])
 
-const payloadSchema = z.object({
+export const payloadSchema = z.object({
   kind:       z.enum(['error', 'event']),
   name:       z.string().min(1).max(120),
   installId:  z.string().max(64),
@@ -83,7 +83,7 @@ const payloadSchema = z.object({
   appVersion: z.string().max(40),
   message:    z.string().max(2_000).optional(),
   stack:      z.string().max(8_000).optional(),
-  props:      z.record(propValue).optional(),
+  props:      z.record(z.string(), propValue).optional(),
   at:         z.string().datetime(),
 }).strict() // unknown keys are a bug or an attack; either way, refuse
 
