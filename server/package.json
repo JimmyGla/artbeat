@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "data:refresh": "./scripts/refresh.sh",
+    "data:refresh": "bash scripts/refresh.sh",
     "db:audit": "ts-node --transpile-only scripts/auditData.ts",
     "db:clear-events": "ts-node --transpile-only scripts/clearEvents.ts",
     "db:reconcile": "ts-node --transpile-only scripts/reconcile.ts",

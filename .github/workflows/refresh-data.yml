@@ -69,9 +69,9 @@ jobs:
       - name: Refresh
         run: |
           if [ "${{ inputs.skip_scrape }}" = "true" ]; then
-            ./scripts/refresh.sh --skip-scrape
+            bash scripts/refresh.sh --skip-scrape
           else
-            ./scripts/refresh.sh
+            bash scripts/refresh.sh
           fi
 
       # Keep the log even when the refresh fails — that is when it is wanted.
