@@ -28,7 +28,11 @@ concurrency:
 jobs:
   refresh:
     name: scrape → repair → audit
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the scraper needs Playwright's Chromium, and
+    # Playwright only installs on Ubuntu versions it supports. When
+    # ubuntu-latest became 26.04, 1.59.1 refused it ("does not support chromium
+    # on ubuntu26.04-x64"). Move this up together with a Playwright upgrade.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
       run:
