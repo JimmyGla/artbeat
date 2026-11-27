@@ -67,6 +67,23 @@ export function looksFree(raw: string): boolean {
     .test(raw)
 }
 
+/**
+ * Split arte.it's page title into its parts.
+ *
+ * arte.it has no JSON-LD, so the title comes from og:title, which reads
+ * "<show> - Mostra - <city> - <venue> - Arte.it". Every arte.it row was stored
+ * with that whole string as its name. The show title itself may contain " - ",
+ * and so may the venue ("MIC - Museo Interattivo del Cinema"), so split on the
+ * last " - Mostra - " and take the city as the next segment. Titles without
+ * the pattern come back unchanged.
+ */
+export function splitListingTitle(raw: string): { title: string; city?: string; venue?: string } {
+  const t = raw.replace(/\s+/g, ' ').trim()
+  const m = t.match(/^(.*) - Mostra - (.*?) - (.*) - Arte\.it$/i)
+  if (!m || !m[1].trim()) return { title: t }
+  return { title: m[1].trim(), city: m[2].trim() || undefined, venue: m[3].trim() || undefined }
+}
+
 /** Reject listing-page headings that are not actually event titles. */
 export function isValidEventTitle(title: string): boolean {
   if (!title || title.length < 8) return false

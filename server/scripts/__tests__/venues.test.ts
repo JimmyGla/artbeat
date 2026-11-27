@@ -5,8 +5,65 @@ import {
   normalizeForMatch,
   isUsableVenueName,
   inferVenueKind,
+  parseLabelledVenue,
 } from '../venues'
 import { VenueKind } from '@prisma/client'
+
+describe('parseLabelledVenue', () => {
+  // innerText upper-cases arte.it's labels; textContent does not.
+  it('reads the venue and address lines in either case', () => {
+    const text = 'Dal 30 Ottobre 2026 al 4 Dicembre 2026\nLUOGO: Bottegantica\nINDIRIZZO: Via A. Manzoni 45\nORARI: dal martedì'
+    expect(parseLabelledVenue(text)).toEqual({ name: 'Bottegantica', address: 'Via A. Manzoni 45' })
+    expect(parseLabelledVenue('Luogo: Museo della Permanente\nIndirizzo: Via Filippo Turati 34'))
+      .toEqual({ name: 'Museo della Permanente', address: 'Via Filippo Turati 34' })
+  })
+
+  it('drops "Sedi varie" as an address', () => {
+    expect(parseLabelledVenue('Luogo: Sedi varie\nIndirizzo: Sedi varie').address).toBeUndefined()
+  })
+
+  it('returns nothing when the page has no labels', () => {
+    expect(parseLabelledVenue('A show about light, at a gallery somewhere.')).toEqual({ name: undefined, address: undefined })
+  })
+})
+
+describe('resolveVenue with a listed venue', () => {
+  it('uses the listed name and address, with the city', () => {
+    expect(resolveVenue({ listedVenue: { name: 'Bottegantica', address: 'Via A. Manzoni 45', city: 'Milano' } }))
+      .toEqual({ name: 'Bottegantica', address: 'Via A. Manzoni 45, Milano', type: VenueKind.OTHER })
+  })
+
+  it('keeps a metro-area city so the address geocodes to the right town', () => {
+    expect(resolveVenue({
+      listedVenue: { name: 'Museo Nazionale di Fotografia', address: 'Via Giovanni Frova 10', city: 'Cinisello Balsamo' },
+    })?.address).toBe('Via Giovanni Frova 10, Cinisello Balsamo')
+  })
+
+  it('prefers the curated entry for a known venue', () => {
+    expect(resolveVenue({ listedVenue: { name: 'Palazzo Reale', address: 'Piazza Duomo' } })?.address)
+      .toBe('Piazza del Duomo 12, 20122 Milano')
+  })
+
+  it('beats an institution merely mentioned in the description', () => {
+    expect(resolveVenue({
+      listedVenue: { name: 'Galleria M77', address: 'Via Mecenate 77' },
+      description: 'Dopo la mostra a Palazzo Reale, le opere arrivano in galleria.',
+    })?.name).toBe('Galleria M77')
+  })
+
+  it('never takes "Sedi varie" as a venue', () => {
+    expect(resolveVenue({ listedVenue: { name: 'Sedi varie' } })).toBeNull()
+  })
+
+  it('does not override a single-venue source', () => {
+    const mudec = { name: 'MUDEC – Museo delle Culture', address: 'Via Tortona 56, 20144 Milano', type: VenueKind.MUSEUM }
+    expect(resolveVenue({ sourceVenue: mudec, listedVenue: { name: 'Somewhere Else' } })).toEqual(mudec)
+  })
+
+  it('types a basilica as a church', () => {
+    expect(inferVenueKind('Basilica di Sant’Ambrogio')).toBe(VenueKind.CHURCH)
+  })
+})
 
 /**
  * These tests exist because venue resolution was the single worst bug in the
