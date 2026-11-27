@@ -27,8 +27,7 @@ retention waits.
 
 ## Targets
 
-Proposed by the team on 2026-11-27. **CEO: confirm or change these numbers**;
-until then they stand.
+Confirmed by the CEO on 2026-11-27.
 
 | # | Target by 2027-02-28 | How it's measured |
 |---|---|---|

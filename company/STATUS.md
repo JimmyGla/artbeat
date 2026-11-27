@@ -12,7 +12,7 @@ _Last updated: 2026-11-27 (setup day)_
 
 | Target | Goal | Now | |
 |---|---|---|---|
-| T1 Web app live & shareable | public URL, installable | not yet: no web host | 🔴 |
+| T1 Web app live & shareable | public URL, installable | host chosen (Cloudflare Pages), setup is R3 | 🔴 |
 | T2 Weekly active users | ≥ 100 | unknown: telemetry not read yet | ⚪ |
 | T3 Week-2 return rate | ≥ 25% | not measured yet (R13) | ⚪ |
 | T4 Coverage of the top 40 venues | ≥ 80% | not measured yet (R11); 79 shows at 29 venues live | ⚪ |
@@ -30,13 +30,13 @@ _Last updated: 2026-11-27 (setup day)_
 
 ## What happened recently
 
-- **27 Nov:** the agent team was set up (PR #6). Strategy: web app first, €0 budget.
+- **27 Nov:** the agent team was set up (PRs #6, #7). Strategy: web app first, €0 budget. Targets confirmed; Cloudflare Pages chosen.
 - **26–27 Nov:** `DATABASE_URL` secret added; two manual data refreshes succeeded; 79 Milan shows live.
 - **Earlier:** the arte.it scraper now crawls the whole Milan listing (PR #5); the refresh workflow fixed (PRs #3, #4).
 
 ## What we need from you
 
-See [CEO_INBOX.md](CEO_INBOX.md). Right now: **2 items, about 7 minutes.**
+See [CEO_INBOX.md](CEO_INBOX.md). Right now: **nothing** — next is a ~10 min Cloudflare Pages connect when the R3 PR lands.
 
 ## Production right now
 
