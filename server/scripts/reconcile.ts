@@ -58,9 +58,9 @@ function readHealth(): SourceHealth[] | null {
 
 async function detectTakedowns(health: SourceHealth[]) {
   // Absence is only evidence when the source both worked AND showed us its
-  // whole programme. A capped listing is a page: arte.it rotates 20 at a time,
-  // so a show sliding off page one would otherwise look withdrawn within three
-  // runs even though it is still open.
+  // whole programme. A capped listing is a slice: when the scraper stopped at
+  // its link cap, a show past the cut would otherwise look withdrawn within
+  // three runs even though it is still open.
   const usable = (h: SourceHealth) => h.linkCount > 0 && h.events > 0 && !h.capped
   const healthy = health.filter(usable).map((h) => h.label)
   const skipped = health.filter((h) => !usable(h))
