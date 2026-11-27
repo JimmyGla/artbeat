@@ -60,6 +60,12 @@ describe('resolveVenue with a listed venue', () => {
     expect(resolveVenue({ sourceVenue: mudec, listedVenue: { name: 'Somewhere Else' } })).toEqual(mudec)
   })
 
+  it('matches arte.it\'s spelling of PAC to the curated entry', () => {
+    // It created a second PAC pin at the same address.
+    expect(resolveVenue({ listedVenue: { name: 'PAC Padiglione di Arte Contemporanea', address: 'Via Palestro 14' } })?.name)
+      .toBe("PAC – Padiglione d'Arte Contemporanea")
+  })
+
   it('types a basilica as a church', () => {
     expect(inferVenueKind('Basilica di Sant’Ambrogio')).toBe(VenueKind.CHURCH)
   })

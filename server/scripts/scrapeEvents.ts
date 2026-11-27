@@ -9,7 +9,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { parseDate, parseDateRange } from './dateParser'
 import { resolveVenue, inferVenueKind, parseLabelledVenue, ResolvedVenue } from './venues'
-import { geocode } from './geocode'
+import { geocodeVenue } from './geocode'
 import { parsePrice, matchFormat, looksFree, isValidEventTitle, isUsefulDescription, splitListingTitle } from './extractors'
 import { matchArtForms } from './artFormMatcher'
 import { SOURCES, type SourceDetailHints } from './sources'
@@ -462,7 +462,7 @@ async function getOrCreateVenue(venue: ResolvedVenue, cityId: string) {
   // geocoding starts working for it.
   if (existing && !existing.isPlaceholder) return existing
 
-  const coords = await geocode(venue.address)
+  const coords = await geocodeVenue(venue)
 
   if (existing) {
     if (!coords) return existing

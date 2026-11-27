@@ -53,7 +53,7 @@ export const MILAN_VENUES: VenueEntry[] = [
   { name: 'Fondazione Prada',                 address: 'Largo Isarco 2, 20139 Milano',         type: VenueKind.FOUNDATION, aliases: ['fondazione prada'], website: 'https://www.fondazioneprada.org/' },
   { name: 'Pirelli HangarBicocca',            address: 'Via Chiese 2, 20126 Milano',           type: VenueKind.GALLERY, aliases: ['hangarbicocca', 'hangar bicocca'], website: 'https://pirellihangarbicocca.org/' },
   { name: 'Museo del Novecento',              address: 'Piazza del Duomo 8, 20123 Milano',     type: VenueKind.MUSEUM,  aliases: ['museo del novecento'], website: 'https://www.museodelnovecento.org/' },
-  { name: "PAC – Padiglione d'Arte Contemporanea", address: 'Via Palestro 14, 20121 Milano',   type: VenueKind.GALLERY, aliases: ["padiglione d'arte contemporanea", 'pac milano'], website: 'https://www.pacmilano.it/' },
+  { name: "PAC – Padiglione d'Arte Contemporanea", address: 'Via Palestro 14, 20121 Milano',   type: VenueKind.GALLERY, aliases: ["padiglione d'arte contemporanea", 'padiglione di arte contemporanea', 'pac milano'], website: 'https://www.pacmilano.it/' },
   { name: "GAM – Galleria d'Arte Moderna",    address: 'Via Palestro 16, 20121 Milano',        type: VenueKind.MUSEUM,  aliases: ["galleria d'arte moderna", 'gam milano'], website: 'https://www.gam-milano.com/' },
   { name: 'Castello Sforzesco',               address: 'Piazza Castello, 20121 Milano',        type: VenueKind.HISTORIC_BUILDING,  aliases: ['castello sforzesco'], website: 'https://www.milanocastello.it/' },
   { name: 'Museo Poldi Pezzoli',              address: 'Via Manzoni 12, 20121 Milano',         type: VenueKind.HOUSE_MUSEUM,  aliases: ['poldi pezzoli'], website: 'https://museopoldipezzoli.it/' },
