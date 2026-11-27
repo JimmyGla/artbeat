@@ -7,7 +7,9 @@ _Last updated: 2026-11-27 (setup day)_
 
 ## Where we're going
 
-**Goal by 28 Feb 2027:** real people in Milan using ArtBeat as a free web app
+**Web launch ~14 Dec 2026 · user targets by late Jan 2027 · deadline 28 Feb 2027.**
+
+**Goal:** real people in Milan using ArtBeat as a free web app
 (details: [CHARTER.md](CHARTER.md)).
 
 | Target | Goal | Now | |

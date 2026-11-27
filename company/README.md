@@ -58,9 +58,9 @@ Schedules live in [ROUTINES.md](ROUTINES.md).
    that changes a shared service goes into `CEO_INBOX.md` as a request.
 3. **`CLAUDE.md` is law.** Its "Rules that are easy to break" are checked on
    every PR by `qa-reviewer`.
-4. **The CEO has under 5 hours a week.** So:
-   - At most **2 open agent code PRs** at a time. If two are waiting, nobody
-     starts a third; they improve the open ones or do research instead.
+4. **The CEO reviews 2–3 times a week (about 3–4 h).** So:
+   - At most **3 open agent code PRs** at a time. If three are waiting, nobody
+     starts a fourth; they improve the open ones or do research instead.
    - Decisions are batched into `CEO_INBOX.md` once a week, each with a
      recommendation and a default that happens if the CEO says nothing.
    - A PR must be reviewable in 10 minutes: one task, small diff, a "How to

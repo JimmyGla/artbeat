@@ -3,6 +3,16 @@
 Newest first. One entry per decision: date, decision, why, who decided. Agents
 append here when the CEO answers something in `CEO_INBOX.md`.
 
+## 2026-11-27 — Fast plan: web launch by 14 Dec
+
+- **Decision:** web launch (M1) by 2026-12-14, user targets (T2, T3) by late
+  January; 28 Feb stays as the hard deadline. The open agent code PR limit
+  goes from 2 to 3, and the CEO reviews 2–3 times a week.
+- **Why:** code isn't the bottleneck; CEO review speed and real users are.
+  Reviewing more often roughly halves the time to launch, and the Christmas
+  holidays are a good launch window.
+- **Decided by:** CEO.
+
 ## 2026-11-27 — Targets confirmed; Cloudflare Pages for the web app
 
 - **Decision:** the charter targets T1–T5 stand as proposed. The web app is

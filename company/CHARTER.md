@@ -7,7 +7,19 @@ the targets; the product-manager may propose edits through `CEO_INBOX.md`.
 
 Be the app people in Milan open to decide which exhibition to see this week.
 
-## The goal for the next 3 months (to 2027-02-28)
+## The goal: fast plan (chosen 2026-11-27)
+
+| Milestone | Target date | Targets |
+|---|---|---|
+| **M1 Web launch:** live on Cloudflare Pages, installable, every show shareable | **2026-12-14** | T1 |
+| **M2 Content you can trust:** top-venue coverage and nightly freshness | 2026-12-21 | T4, T5 |
+| **M3 Launch push:** posts, student groups, galleries (the CEO publishes) | from 2026-12-15 | — |
+| **M4 People come back:** 100 weekly users, week-2 return measured | **late Jan 2027** | T2, T3 |
+| Hard deadline for all targets | 2027-02-28 | T1–T5 |
+
+Planning rule: the "Now" list must fit before M1. Anything that doesn't help
+launch by 14 Dec moves after it. If M1 slips, `/weekly-review` says why and
+gives the new date.
 
 **Real users in Milan, on a €0 budget.** Launch as a **web app first**: a
 public, installable PWA on a free host, and get people coming back. The App
@@ -42,7 +54,9 @@ roadmap task, not a reason to skip the target.
 
 ## Constraints
 
-- **CEO time:** under 5 hours a week. See the operating rules in `README.md`.
+- **CEO time:** reviews PRs 2–3 times a week (about 3–4 h a week), plus
+  about 15 min a day publishing posts during the launch push. At most 3 open
+  agent code PRs. See the operating rules in `README.md`.
 - **Budget: €0/month.** Free tiers only: Render free (API), Supabase free
   (DB), GitHub Actions, a free static host for the web app. Any cost at all —
   a domain, a paid tier, store fees — is a CEO decision raised through
