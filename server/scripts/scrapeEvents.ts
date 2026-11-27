@@ -29,6 +29,7 @@ const prisma = new PrismaClient()
  */
 const USER_AGENT = 'ArtBeatBot/1.0 (+https://artbeat.app/bot; listings aggregator; contact: hello@artbeat.app)'
 const DELAY_MS = 2000
+/** Default per-source link cap; a source can raise it with `maxLinks`. */
 const MAX_PER_SOURCE = 20
 
 const MILAN_LAT = 45.4654
@@ -57,6 +58,8 @@ interface ScrapedEvent {
 interface SourceResult {
   events:    ScrapedEvent[]
   linkCount: number
+  /** The cap this source ran with; reaching it means the listing was truncated. */
+  maxLinks:  number
 }
 
 interface UpsertStats {
@@ -305,6 +308,7 @@ async function scrapeGeneric(
   source: string,
   fallbackVenue?: ResolvedVenue,
   hints?: SourceDetailHints,
+  maxLinks: number = MAX_PER_SOURCE,
 ): Promise<SourceResult> {
   const results: ScrapedEvent[] = []
   let linkCount = 0
@@ -353,7 +357,7 @@ async function scrapeGeneric(
           return true
         })
         .slice(0, max)
-    }, { max: MAX_PER_SOURCE, regexStr: linkRegex.source })
+    }, { max: maxLinks, regexStr: linkRegex.source })
 
     // A source that suddenly yields nothing has almost certainly changed its
     // markup — the link regex no longer matches.  Say so loudly: this used to
@@ -376,7 +380,7 @@ async function scrapeGeneric(
   } catch (err) {
     console.warn(`  ${source} failed: ${(err as Error).message}`)
   }
-  return { events: results, linkCount }
+  return { events: results, linkCount, maxLinks }
 }
 
 
@@ -597,7 +601,7 @@ async function main() {
 
   for (const src of SOURCES) {
     console.log(`🌐 Scraping ${src.label}...`)
-    const result = await scrapeGeneric(page, src.url, src.linkRe, src.label, src.venue, src.detail)
+    const result = await scrapeGeneric(page, src.url, src.linkRe, src.label, src.venue, src.detail, src.maxLinks)
     perSource.set(src.label, result)
     allScraped.push(...result.events)
   }
@@ -666,7 +670,7 @@ async function main() {
     // Hitting the per-source cap means we saw a page, not the whole programme.
     // Absence from a truncated listing says nothing about whether a show is
     // still running, so takedown detection must ignore these entirely.
-    capped:    r.linkCount >= MAX_PER_SOURCE,
+    capped:    r.linkCount >= r.maxLinks,
     ranAt:     runStartedAt.toISOString(),
   }))
   const logDir = path.resolve(__dirname, '../logs')

@@ -36,6 +36,12 @@ export interface Source {
   /** Per-site selector hints; the generic extractors are the fallback. */
   detail?: SourceDetailHints
   /**
+   * Most detail pages to crawl from the listing (default 20). Set it above the
+   * size of the source's whole programme: a run that reaches the cap is marked
+   * truncated, and takedown detection then ignores the source.
+   */
+  maxLinks?: number
+  /**
    * Why this source is here, and anything known about how it behaves. Written
    * down because "why are we crawling this" is the first question when a source
    * starts failing.
@@ -59,7 +65,14 @@ export const SOURCES: Source[] = [
   {
     label: 'arte.it',
     url: 'https://www.arte.it/calendario-arte/milano',
-    linkRe: /arte\.it\/.*mostra-/,
+    // Milan only. The listing's sidebar and footer link to other cities'
+    // shows (calendario-arte/bari/mostra-…) and to news articles whose slug
+    // contains "mostra-"; the old /arte\.it\/.*mostra-/ matched those too.
+    linkRe: /arte\.it\/calendario-arte\/milano\/mostra-/,
+    // The listing's first page already links every current Milan show (63 on
+    // 2026-11-27); its ?p=2… pages only show slices of the same set, so there
+    // is nothing to paginate. The old cap of 20 was ours, not arte.it's.
+    maxLinks: 150,
     note:
       'The aggregator carrying almost all coverage. Good JSON-LD for dates, but ' +
       'no og:description and no clean prose paragraph, which is why most of its ' +
