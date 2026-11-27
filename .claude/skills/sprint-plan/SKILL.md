@@ -20,9 +20,14 @@ can do.
    moves the target that's furthest behind), split oversized tasks, add the
    gaps worth fixing as new tasks, move anything that doesn't serve the
    charter to "Later".
-3. Branch `agent/company/<yyyy>-w<week>` from `origin/main`, commit the
-   roadmap + metrics report, push, open a PR titled
+3. Rewrite `company/STATUS.md` (keep its layout): target table with this
+   week's numbers and 🟢🟡🔴⚪, the launch progress bar (done / total "Now"
+   items), done · in progress · next up, recent events (keep the last ~5),
+   the inbox count and minutes, and the production line. Plain language: the
+   CEO should understand it in 2 minutes on a phone.
+4. Branch `agent/company/<yyyy>-w<week>` from `origin/main`, commit the
+   roadmap, status page and metrics report, push, open a PR titled
    `company: sprint plan <yyyy>-w<week>`. If that branch already has an open
    PR this week, commit to it instead.
-4. Report in ≤ 10 lines: the week's goal in one sentence, the ordered tasks,
+5. Report in ≤ 10 lines: the week's goal in one sentence, the ordered tasks,
    what needs the CEO, the PR link.

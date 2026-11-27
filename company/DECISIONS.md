@@ -3,6 +3,14 @@
 Newest first. One entry per decision: date, decision, why, who decided. Agents
 append here when the CEO answers something in `CEO_INBOX.md`.
 
+## 2026-11-27 — Routines get read-only visibility only
+
+- **Decision:** the standup and sprint-plan routines may read Render and
+  Supabase (allow-listed read tools only). No routine can change a service.
+- **Why:** routines run unattended; a write mistake would hit production
+  with nobody watching. Service changes stay in the CEO inbox.
+- **Decided by:** CEO.
+
 ## 2026-11-27 — Web app first, €0 budget
 
 - **Decision:** launch as a free-hosted, installable web app (PWA). App store

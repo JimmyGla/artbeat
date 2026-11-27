@@ -19,8 +19,11 @@ nightly with Playwright.
 ## Audit (read-only)
 
 - From the **public API** (no secrets needed): fetch
-  `https://artbeat-server.onrender.com/api/exhibitions` and `/api/venues`
-  (allow 90 s for a cold start). Count shows per venue and per source; flag
+  `https://artbeat-server.onrender.com/api/cities/milan/exhibitions` and
+  `/api/cities/milan/venues` (allow 90 s for a cold start). Exhibitions have
+  `title`, `run`, `startsOn`, `endsOn`, `venue`, `artForms`; ended shows are
+  hidden unless `?includeEnded=true`. Freshness comes from the
+  `refresh-data.yml` runs (public GitHub API, see `.claude/agents/sre.md`). Count shows per venue and per source; flag
   shows past their end date, shows with no end date, venues with zero current
   shows, missing descriptions or art forms.
 - Coverage: compare against the venues' own "current exhibitions" pages for

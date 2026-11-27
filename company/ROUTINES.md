@@ -21,6 +21,13 @@ Every routine prompt also starts with:
 > use only public endpoints and say "not reachable" for anything that needs a
 > secret.
 
+## Connectors
+
+Only `artbeat-standup` and `artbeat-sprint-plan` have connectors: Render and
+Supabase, each limited to a list of read-only tools (status, deploys, logs,
+metrics, advisors) and told never to change anything. The other three have
+none. Decided 2026-11-27 (see `DECISIONS.md`).
+
 ## What the routines can't do
 
 - **Read telemetry or run `db:audit`** — they need `DATABASE_URL`, which stays

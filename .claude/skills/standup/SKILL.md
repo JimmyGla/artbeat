@@ -10,10 +10,10 @@ phone. No commits, no PRs.
 
 1. Delegate in parallel (Agent tool, one message):
    - `sre`: full production check (its standard output block).
-   - `data-editor`: quick freshness check only — from the public API, count of
-     current exhibitions, how many are past their end date, newest update and
-     its age, any venue that dropped to zero shows since yesterday if you can
-     tell. No coverage audit today.
+   - `data-editor`: quick freshness check only — from
+     `/api/cities/milan/exhibitions`: count of current shows, how many are past
+     `endsOn` (should be 0), how many have no end date; plus the time of the
+     last successful `refresh-data` run. No coverage audit today.
 2. Yourself: list open PRs on `agent/*` branches (GitHub connector, or
    `git ls-remote origin 'refs/heads/agent/*'` for branches) and the top
    `ready` task in `company/ROADMAP.md`.
@@ -22,7 +22,7 @@ phone. No commits, no PRs.
 ```
 ArtBeat standup — <date>
 Prod: 🟢/🟡/🔴 <one line>
-Data: <n current shows · newest <age> · <k> expired still listed>
+Data: <n current shows · last refresh <age> · <k> expired still listed>
 PRs waiting for CEO: <n> <titles>
 Today: <what the team will do — e.g. engineer on R5 tonight, or "paused: 2 PRs waiting">
 Needs you: <nothing | one line each>

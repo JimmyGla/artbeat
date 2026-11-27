@@ -10,14 +10,20 @@ don't answer** · time it takes you.
 
 1. **Confirm the charter targets** (`CHARTER.md`, T1–T5). Recommendation: keep
    them. Default if no answer: they stand. ~5 min.
-2. **Merge the `agent-team` PR, then create the routines** in `ROUTINES.md`.
-   Default: no scheduled work happens. ~10 min.
-3. **R3: approve Cloudflare Pages as the free web host.** Recommendation:
+2. **R3: approve Cloudflare Pages as the free web host.** Recommendation:
    yes (free, unlimited bandwidth, a preview URL per PR). Default: the
-   engineer writes the setup for Cloudflare Pages. ~2 min.
-4. **R1 / R2: confirm the refresh secret and Render auto-deploy are set.**
-   Default: the team keeps flagging it in every standup. ~10 min.
+   engineer writes the setup for Cloudflare Pages, and you do the one-time
+   "connect repo" click when that PR lands. ~2 min now, ~10 min later.
+## Being watched (no action yet)
+
+- **Can the cloud routines open PRs themselves?** We'll know after tonight's
+  review. If not, they leave you a one-click "compare" link, and the team
+  will tell you what to connect so they can.
+- **Nightly data refresh (R1):** works when run by hand, but GitHub hasn't
+  fired the 04:15 UTC schedule since 26 Oct. The standup reports it daily; if
+  it still hasn't fired by Monday, the team will propose a fix.
+- **Auto-deploy (R2):** worked for PR #5; the standup checks that PR #6 landed.
 
 ## Answered
 
-_(moved here with the answer and the date, then logged in `DECISIONS.md`)_
+- 2026-11-27 — Merge the `agent-team` PR and create the routines: done (PR #6, five routines live).
