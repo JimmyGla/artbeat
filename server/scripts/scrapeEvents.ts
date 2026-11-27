@@ -8,9 +8,9 @@ import * as dotenv from 'dotenv'
 import * as path from 'path'
 import * as fs from 'fs'
 import { parseDate, parseDateRange } from './dateParser'
-import { resolveVenue, inferVenueKind, ResolvedVenue } from './venues'
+import { resolveVenue, inferVenueKind, parseLabelledVenue, ResolvedVenue } from './venues'
 import { geocode } from './geocode'
-import { parsePrice, matchFormat, looksFree, isValidEventTitle, isUsefulDescription } from './extractors'
+import { parsePrice, matchFormat, looksFree, isValidEventTitle, isUsefulDescription, splitListingTitle } from './extractors'
 import { matchArtForms } from './artFormMatcher'
 import { SOURCES, type SourceDetailHints } from './sources'
 
@@ -200,10 +200,14 @@ async function scrapeDetailPage(
 
     // Per-source selectors first; JSON-LD and og: tags are the fallback, not
     // the other way round, because a site that needs hints needs them to win.
-    const title =
+    const rawTitle =
       (await firstMatch(page, hints?.title)) ||
       (jsonLd?.['name'] as string) || meta.ogTitle ||
       await page.$eval('h1, .title, article h1', el => el.textContent?.trim() ?? '').catch(() => '')
+    // arte.it's og:title carries " - Mostra - <city> - <venue> - Arte.it".
+    // Keep the show's name only; the city and venue feed venue resolution.
+    const listing = splitListingTitle(rawTitle)
+    const title = listing.title
 
     if (!isValidEventTitle(title)) return null
 
@@ -273,10 +277,19 @@ async function scrapeDetailPage(
 
     // Venue: structured data → single-venue source → known institution named
     // in the page.  `null` means unknown, and stays unknown — see venues.ts.
-    const pageText = await page.evaluate(() => document.body.innerText.slice(0, 4000)).catch(() => '')
+    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '')
+    const pageText = bodyText.slice(0, 4000)
+    // "Luogo:" / "Indirizzo:" can sit past the first 4000 characters, after a
+    // long caption, so read them from the whole body.
+    const labelled = parseLabelledVenue(bodyText)
     const venue = resolveVenue({
       jsonLdLocation: (jsonLd?.['location'] as any) ?? null,
       sourceVenue:    fallbackVenue ?? null,
+      listedVenue:    {
+        name:    labelled.name ?? listing.venue,
+        address: labelled.address,
+        city:    listing.city,
+      },
       title,
       description,
       pageText,

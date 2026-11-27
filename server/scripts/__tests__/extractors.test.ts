@@ -5,7 +5,36 @@ import {
   looksFree,
   isValidEventTitle,
   isUsefulDescription,
+  splitListingTitle,
 } from '../extractors'
+
+describe('splitListingTitle', () => {
+  // Every arte.it row was stored with this whole string as its title.
+  it('splits an arte.it og:title into show, city and venue', () => {
+    expect(splitListingTitle('Futurismo 1918–1944 - Mostra - Milano - Bottegantica - Arte.it'))
+      .toEqual({ title: 'Futurismo 1918–1944', city: 'Milano', venue: 'Bottegantica' })
+  })
+
+  it('keeps " - " inside the show title and inside the venue', () => {
+    expect(splitListingTitle(
+      'Gianluigi Toccafondo. Le prime stelle - Le dive italiane che sedussero il cinema - Mostra - Milano - MIC - Museo Interattivo del Cinema - Arte.it',
+    )).toEqual({
+      title: 'Gianluigi Toccafondo. Le prime stelle - Le dive italiane che sedussero il cinema',
+      city:  'Milano',
+      venue: 'MIC - Museo Interattivo del Cinema',
+    })
+  })
+
+  it('reads a city outside Milan', () => {
+    expect(splitListingTitle('Vedere oltre. Fotografia e sacro - Mostra - Cinisello Balsamo - Museo Nazionale di Fotografia - Arte.it').city)
+      .toBe('Cinisello Balsamo')
+  })
+
+  it('leaves other titles alone', () => {
+    expect(splitListingTitle('Matisse. Il mondo in una stanza')).toEqual({ title: 'Matisse. Il mondo in una stanza' })
+    expect(splitListingTitle('  Spaced   title ')).toEqual({ title: 'Spaced title' })
+  })
+})
 
 describe('parsePrice', () => {
   it('extracts a numeric price', () => {

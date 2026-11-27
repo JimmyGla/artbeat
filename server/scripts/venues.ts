@@ -110,6 +110,8 @@ const NOT_A_VENUE = [
   'milan', 'milano', 'italy', 'italia', 'lombardia',
   'arte.it', 'milanotoday', 'mostra', 'mostre', 'evento', 'eventi',
   'exhibition', 'home', 'various', 'varie', 'tbd', 'n/a',
+  // arte.it's label for a show spread over several places.
+  'sedi varie', 'varie sedi', 'sedi diverse', 'luoghi vari',
 ]
 
 export function isUsableVenueName(raw: string | undefined | null): boolean {
@@ -123,6 +125,7 @@ export function isUsableVenueName(raw: string | undefined | null): boolean {
 /** Best-effort venue kind from the name, so the chip is not always "Venue". */
 export function inferVenueKind(name: string): VenueKind {
   const n = name.toLowerCase()
+  if (/\b(basilica|chiesa|church|duomo)\b/.test(n))                return VenueKind.CHURCH
   if (/\b(museo|museum|pinacoteca|mudec)\b/.test(n))              return VenueKind.MUSEUM
   if (/\b(galleria|gallery|gallerie|fondazione|foundation)\b/.test(n)) return VenueKind.GALLERY
   if (/\b(teatro|theatre|theater|auditorium)\b/.test(n))          return VenueKind.THEATER
@@ -144,12 +147,38 @@ export function matchKnownVenue(...texts: (string | undefined | null)[]): Resolv
   return null
 }
 
+/** A venue a listing page names in plain text, as opposed to JSON-LD. */
+export interface ListedVenue {
+  name?:    string
+  /** Street address without the city, as arte.it gives it. */
+  address?: string
+  city?:    string
+}
+
+/**
+ * Read the "Luogo: …" (venue) and "Indirizzo: …" (address) lines from a
+ * listing page's text. arte.it states both on every show page; before this was
+ * read, a fifth of its shows had no venue and were left off the map.
+ */
+export function parseLabelledVenue(text: string): { name?: string; address?: string } {
+  const field = (label: string) =>
+    text.match(new RegExp(`^[ \\t]*${label}[ \\t]*:[ \\t]*(.+?)[ \\t]*$`, 'im'))?.[1]?.trim() || undefined
+  const name = field('luogo')
+  const address = field('indirizzo')
+  return {
+    name,
+    // "Indirizzo: Sedi varie" is a label, not a street.
+    address: address && isUsableVenueName(address) ? address : undefined,
+  }
+}
+
 /**
  * Resolve a venue, in descending order of trustworthiness:
  *
  *   1. structured JSON-LD `location` (the source told us explicitly)
  *   2. the source's own venue, for single-venue sites like MUDEC
- *   3. a known Milan institution named in the text
+ *   3. a venue the listing names in plain text (arte.it's "Luogo:" line)
+ *   4. a known Milan institution named in the text
  *
  * Returns `null` when none apply.  Callers must treat that as "unknown
  * location" — never as an excuse to substitute the city centre.
@@ -157,11 +186,12 @@ export function matchKnownVenue(...texts: (string | undefined | null)[]): Resolv
 export function resolveVenue(input: {
   jsonLdLocation?: { name?: string; address?: unknown } | null
   sourceVenue?:    ResolvedVenue | null
+  listedVenue?:    ListedVenue | null
   title?:          string
   description?:    string
   pageText?:       string
 }): ResolvedVenue | null {
-  const { jsonLdLocation, sourceVenue, title, description, pageText } = input
+  const { jsonLdLocation, sourceVenue, listedVenue, title, description, pageText } = input
 
   // 1 — structured data.
   const ldName = jsonLdLocation?.name?.trim()
@@ -191,6 +221,25 @@ export function resolveVenue(input: {
   // 2 — single-venue source.
   if (sourceVenue) return sourceVenue
 
-  // 3 — a known institution mentioned anywhere in the page.
+  // 3 — the venue the listing names. Ahead of the free-text match because a
+  // description often mentions other institutions (a lender, a past show).
+  const listedName = listedVenue?.name?.trim()
+  if (isUsableVenueName(listedName)) {
+    const known = matchKnownVenue(listedName)
+    if (known) return known
+
+    // The city matters: arte.it's Milan listing includes the metro area
+    // (Cinisello Balsamo, Monza), and "Via Frova 10, Milano" would geocode to
+    // the wrong place or nowhere.
+    const city = listedVenue?.city?.trim() || 'Milano'
+    const street = listedVenue?.address?.trim()
+    return {
+      name:    listedName!,
+      address: street ? `${street}, ${city}` : `${listedName}, ${city}`,
+      type:    inferVenueKind(listedName!),
+    }
+  }
+
+  // 4 — a known institution mentioned anywhere in the page.
   return matchKnownVenue(title, description, pageText)
 }
