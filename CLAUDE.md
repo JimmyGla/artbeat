@@ -4,6 +4,16 @@ Map of art exhibitions in Milan. Three parts, each its own npm package (no
 workspaces): `server/` (Express + Prisma API), `client/` (Vite + React web app,
 wrapped by Capacitor for iOS and Android), and the scraper in `server/scripts/`.
 
+## The team
+
+ArtBeat is run like a startup by Claude agents, with the founder as CEO.
+Org chart, operating rules and rituals: `company/README.md`. Goal and
+targets: `company/CHARTER.md` (web app first, €0 budget). Work queue:
+`company/ROADMAP.md`. Employees are in `.claude/agents/`, rituals
+(`/standup`, `/sprint-plan`, `/build-task`, `/data-health`,
+`/weekly-review`, `/launch-check`) in `.claude/skills/`. Agents open PRs;
+only the CEO merges.
+
 ## Commands
 
 Run inside `server/` or `client/` (the root `package.json` only forwards a few).
