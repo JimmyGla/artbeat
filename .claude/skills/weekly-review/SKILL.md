@@ -22,7 +22,9 @@ The one place the CEO spends their time each week. Make it decidable in
    no answer by next Friday** · minutes it takes. Max 5; if there are more,
    the rest wait.
 4. Write `company/reports/<yyyy>-w<week>-review.md`: shipped, metrics table,
-   what we learned, next week's focus.
+   what we learned, next week's focus. Then rewrite `company/STATUS.md`
+   (same rules as in `/sprint-plan`: keep its layout, plain language, current
+   numbers, 2-minute read).
 5. Commit to this week's `agent/company/<yyyy>-w<week>` branch (reuse its PR
    if open, else open `company: week <yyyy>-w<week> review`).
 6. Report: 3-line summary, the inbox items, the PRs to review in order, the

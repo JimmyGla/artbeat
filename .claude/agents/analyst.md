@@ -15,7 +15,7 @@ numbers every week, honestly.
   `npm run telemetry:report -- <days>` in `server/` — this needs a local
   `server/.env` with `DATABASE_URL`. If it's not available (cloud routines),
   say "telemetry not reachable from this session" rather than estimating.
-- Public API: `https://artbeat-server.onrender.com/api/exhibitions`, `/api/venues`
+- Public API: `https://artbeat-server.onrender.com/api/cities/milan/exhibitions`, `/api/cities/milan/venues`
   (allow 90 s for a cold start) for content metrics.
 - `company/reports/` for last weeks' numbers, to show trends.
 - The data-editor's `company/coverage.md` for T4.

@@ -1,5 +1,8 @@
 # ArtBeat, the company
 
+> **CEO: read [STATUS.md](STATUS.md) first.** It's the one-page view of where
+> we're going and what's done, updated every Monday and Friday.
+
 ArtBeat is run like a small startup. The founder (you) is the CEO and the only
 human. Everyone else is a Claude agent defined in `.claude/agents/`, and the
 team's rituals are skills in `.claude/skills/`.

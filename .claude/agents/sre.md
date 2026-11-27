@@ -27,12 +27,15 @@ change it.
    Compare `commit` with `git ls-remote origin refs/heads/main`. A mismatch
    older than ~30 min after a merge means the deploy didn't happen.
 2. A sample of real data: `curl -s -m 90
-   "https://artbeat-server.onrender.com/api/exhibitions"` — count items and
-   find the newest `updatedAt`/`createdAt` if present. Data older than 48 h
-   means the nightly refresh isn't landing.
-3. Workflow runs, if a GitHub connector or `gh` is available: latest
-   conclusion of CI on `main`, `refresh-data`, `uptime`. If not available,
-   say so — don't guess.
+   "https://artbeat-server.onrender.com/api/cities/milan/exhibitions"` — a JSON
+   array (fields include `endsOn`, `venue`; no timestamps). Count items; any
+   with `endsOn` before today is a bug (the API hides ended shows by default).
+3. Workflow runs — the repo is public, so no auth is needed:
+   `curl -s "https://api.github.com/repos/JimmyGla/artbeat/actions/workflows/<file>/runs?per_page=5"`
+   for `ci.yml`, `refresh-data.yml`, `uptime.yml`. Report the latest
+   conclusion and time, and whether **scheduled** (`event: schedule`) runs are
+   actually firing — GitHub drops or delays cron runs. No successful refresh
+   in 48 h means the data is going stale.
 4. If Supabase / Render MCP tools are available, use only read tools
    (status, logs, advisors, deploy list).
 
