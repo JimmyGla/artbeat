@@ -3,6 +3,14 @@
 Newest first. One entry per decision: date, decision, why, who decided. Agents
 append here when the CEO answers something in `CEO_INBOX.md`.
 
+## 2026-11-27 — Targets confirmed; Cloudflare Pages for the web app
+
+- **Decision:** the charter targets T1–T5 stand as proposed. The web app is
+  hosted on Cloudflare Pages (free tier).
+- **Why:** free with unlimited bandwidth and a preview URL per PR; fits the
+  €0 budget. Vercel Hobby is the fallback if Pages causes trouble.
+- **Decided by:** CEO.
+
 ## 2026-11-27 — Routines get read-only visibility only
 
 - **Decision:** the standup and sprint-plan routines may read Render and
