@@ -24,7 +24,7 @@ ArtBeat standup — <date>
 Prod: 🟢/🟡/🔴 <one line>
 Data: <n current shows · last refresh <age> · <k> expired still listed>
 PRs waiting for CEO: <n> <titles>
-Today: <what the team will do — e.g. engineer on R5 tonight, or "paused: 2 PRs waiting">
+Today: <what the team will do — e.g. engineer on R5 tonight, or "paused: 3 PRs waiting">
 Needs you: <nothing | one line each>
 ```
 

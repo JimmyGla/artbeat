@@ -11,7 +11,7 @@ week.
 | `artbeat-sprint-plan` | Mon 08:30 (`30 8 * * 1`) | Run the /sprint-plan skill. | company PR |
 | `artbeat-data-health` | Wed 08:30 (`30 8 * * 3`) | Run the /data-health skill. | company PR (same week branch) |
 | `artbeat-weekly-review` | Fri 17:00 (`0 17 * * 5`) | Run the /weekly-review skill. | company PR (same week branch) |
-| `artbeat-nightly-engineer` | Sun–Thu 23:00 (`0 23 * * 0-4`) | Run the /build-task skill with no argument. | ≤ 1 code PR, paused when 2 are waiting |
+| `artbeat-nightly-engineer` | Sun–Thu 23:00 (`0 23 * * 0-4`) | Run the /build-task skill with no argument. | ≤ 1 code PR, paused when 3 are waiting |
 
 Every routine prompt also starts with:
 
@@ -46,4 +46,4 @@ none. Decided 2026-11-27 (see `DECISIONS.md`).
 ## Pausing the team
 
 Turn the routines off in claude.ai (Routines), or ask any session to "pause
-the ArtBeat routines". Code PRs stop on their own when 2 are waiting.
+the ArtBeat routines". Code PRs stop on their own when 3 are waiting.

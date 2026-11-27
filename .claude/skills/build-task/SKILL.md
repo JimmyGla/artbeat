@@ -11,9 +11,9 @@ You are the chief of staff running one task through the team.
 ## 1. Gate (stop early if any fails, and say why)
 
 - Count open agent code PRs (branches `agent/engineer/*`,
-  `agent/data-editor/*`, `agent/designer/*` with an open PR). If **2 or
+  `agent/data-editor/*`, `agent/designer/*` with an open PR). If **3 or
   more**, don't start new work: instead pick the oldest one with review
-  comments or failing CI and fix that, or stop with "paused: 2 PRs waiting
+  comments or failing CI and fix that, or stop with "paused: 3 PRs waiting
   for the CEO".
 - Pick the task: `$ARGUMENTS` if given, else the first `ready` task in
   `company/ROADMAP.md` that isn't `ceo`. If the task isn't sized for one
