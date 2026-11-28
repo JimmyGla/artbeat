@@ -28,7 +28,8 @@ interface ExhibitionDetail {
   priceCents:  number | null
   imageUrl:    string | null
   ticketUrl:   string | null
-  artForms:    { name: string; slug: string; color: string }[]
+  // Optional: older API builds left it out, and the page must still render.
+  artForms?:   { name: string; slug: string; color: string }[]
   venue: {
     id:         string
     name:       string
@@ -293,7 +294,7 @@ export default function ExhibitionDetailPage() {
               className="inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full mb-2"
               style={{ backgroundColor: accent + '1A', color: accent }}
             >
-              {exhibition.artForms[0]?.name ?? formatLabel(exhibition.format)}
+              {exhibition.artForms?.[0]?.name ?? formatLabel(exhibition.format)}
             </span>
             <h1 className="text-2xl font-bold text-gray-900 leading-tight">{exhibition.title}</h1>
           </div>

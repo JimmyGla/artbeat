@@ -122,8 +122,10 @@ export function formatLabel(format: string): string {
  * carries a colour at all.
  */
 export function accentColor(
-  artForms: { color: string }[],
+  // Optional on purpose: an API response missing the field must cost the
+  // colour, not crash the page.
+  artForms: { color: string }[] | null | undefined,
   fallback = '#7C3AED',
 ): string {
-  return artForms[0]?.color ?? fallback
+  return artForms?.[0]?.color ?? fallback
 }
