@@ -19,6 +19,10 @@ router.get('/:id', async (req: Request, res: Response) => {
       include: {
         category: true,
         venue:    true,
+        // The detail page colours itself from the first art form, the same
+        // field the list endpoint (cities.ts) sends. Without it the page
+        // crashed for every show.
+        artForms: { select: { artForm: { select: { name: true, slug: true, color: true } } } },
       },
     })
 
@@ -27,7 +31,9 @@ router.get('/:id', async (req: Request, res: Response) => {
       return
     }
 
-    res.json(event)
+    // Flatten the join table, as cities.ts does: the client should not have
+    // to know it exists.
+    res.json({ ...event, artForms: event.artForms.map((j) => j.artForm) })
   } catch (err) {
     console.error(err)
     apiError(res, 500, 'Failed to fetch event')
