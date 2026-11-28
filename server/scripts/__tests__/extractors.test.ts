@@ -6,6 +6,7 @@ import {
   isValidEventTitle,
   isUsefulDescription,
   splitListingTitle,
+  joinTitleLines,
 } from '../extractors'
 
 describe('splitListingTitle', () => {
@@ -155,5 +156,20 @@ describe('isUsefulDescription', () => {
 
   it('ignores case and whitespace when comparing', () => {
     expect(isUsefulDescription(title.toUpperCase().replace(/ /g, '  '), title)).toBe(false)
+  })
+})
+
+describe('joinTitleLines', () => {
+  it('joins a two-line heading the way aggregators write it', () => {
+    expect(joinTitleLines('Costantino Nivola\nScolpire il vento')).toBe('Costantino Nivola. Scolpire il vento')
+  })
+
+  it('does not double punctuation', () => {
+    expect(joinTitleLines('Ettore Sottsass:\n  Design Metaphors')).toBe('Ettore Sottsass: Design Metaphors')
+  })
+
+  it('leaves a one-line title alone', () => {
+    expect(joinTitleLines('  Photo Grant Deloitte 2026 ')).toBe('Photo Grant Deloitte 2026')
+    expect(joinTitleLines('')).toBe('')
   })
 })

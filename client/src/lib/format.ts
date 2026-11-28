@@ -64,7 +64,8 @@ const fmtDayShort = (iso: string) =>
  */
 export function dateLabel({ run, startsOn, endsOn }: EventDates): string {
   if (run === 'PERMANENT') return 'Permanent collection'
-  if (!startsOn) return ''
+  // Some venues list a show that is already on by its closing date alone.
+  if (!startsOn) return endsOn ? `Until ${fmtDay(endsOn)}` : ''
   if (!endsOn) return fmtDay(startsOn)
 
   const sameYear = new Date(startsOn).getUTCFullYear() === new Date(endsOn).getUTCFullYear()

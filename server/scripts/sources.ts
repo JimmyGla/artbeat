@@ -51,14 +51,8 @@ export interface Source {
 
 // Single-venue sources: their listing pages only ever show their own programme,
 // so the venue is known without resolving anything.
-const MUDEC_VENUE: ResolvedVenue = {
-  name: 'MUDEC – Museo delle Culture', address: 'Via Tortona 56, 20144 Milano', type: VenueKind.MUSEUM,
-}
 const TRIENNALE_VENUE: ResolvedVenue = {
   name: 'Triennale Milano', address: 'Viale Alemagna 6, 20121 Milano', type: VenueKind.MUSEUM,
-}
-const PRADA_VENUE: ResolvedVenue = {
-  name: 'Fondazione Prada', address: 'Largo Isarco 2, 20139 Milano', type: VenueKind.FOUNDATION,
 }
 
 export const SOURCES: Source[] = [
@@ -86,52 +80,39 @@ export const SOURCES: Source[] = [
     },
   },
   {
-    label: 'mudec',
-    url: 'https://www.mudec.it/mostre-in-corso/',
-    linkRe: /mudec\.it\/[a-z0-9-]+\/?$/,
-    venue: MUDEC_VENUE,
-    note:
-      'Finds ~20 links but yielded 1 event: the old link pattern matched every ' +
-      'mudec.it URL including navigation, and the date format is not JSON-LD. ' +
-      'robots.txt Content-Signal: search=yes, ai-train=no, use=reference — ' +
-      'crawling for reference is sanctioned, training is not.',
-    detail: {
-      title: ['h1.title', 'h1', '.exhibition-title'],
-      description: ['.exhibition-description', '.testo', 'article .content'],
-      dates: ['.exhibition-dates', '.date', 'time'],
-    },
-  },
-  {
     label: 'triennale',
-    url: 'https://triennale.org/en/events/',
-    linkRe: /triennale\.org\/en\/(events|exhibitions)\/[a-z0-9-]+/,
+    // The Italian exhibitions page. The old /en/events URL is a 404, which is
+    // why this source found 0 links; the English /en/program/mostre errors.
+    url: 'https://triennale.org/program/mostre',
+    // Shows live at /eventi/<slug>. The listing also links the permanent
+    // collections (Museo del Design Italiano …); their pages carry no dates,
+    // so the scraper skips them and the curated seed covers them.
+    linkRe: /triennale\.org\/eventi\/[a-z0-9-]+$/,
     venue: TRIENNALE_VENUE,
     note:
-      'Returned 0 links: the grid is client-rendered and the old pattern also ' +
-      'missed /exhibitions/ paths. Now waits for network idle and accepts both.',
+      'Next.js site, no JSON-LD; og:title/description/image are good. A show ' +
+      'already on gives only its closing date ("Fino al 14 febbraio 2027"), so ' +
+      "those rows have no start date; reconcile merges them with arte.it's " +
+      'copy and keeps its start. robots.txt: none (the path serves the app).',
     detail: {
-      title: ['h1', '[class*="hero"] h1'],
-      description: ['[class*="abstract"]', '[class*="description"]', 'article p'],
-      dates: ['[class*="date"]', 'time'],
-    },
-  },
-  {
-    label: 'fondazioneprada',
-    url: 'https://www.fondazioneprada.org/',
-    linkRe: /fondazioneprada\.org\/project\//,
-    venue: PRADA_VENUE,
-    note:
-      'Was blocked by Cloudflare until a browser user-agent was set; now finds ' +
-      '6 links but 0 usable events because its dates are prose, not JSON-LD. ' +
-      'Expect this one to need the date selectors below to work.',
-    detail: {
-      title: ['h1', '.project-title'],
-      description: ['.project-description', '.abstract', 'article p'],
-      dates: ['.project-dates', '.dates', 'time'],
+      // Name and subtitle are two lines of one <h1>.
+      title: ['main h1'],
+      // The red date line under the red "MOSTRA" label (which is uppercase).
+      // Never the page body: a "fino al 30 novembre" promo banner is on every page.
+      dates: ['main div.space-y-3 > div.text-fire:not(.uppercase)'],
     },
   },
 
   // ── Removed ────────────────────────────────────────────────────────────────
+  //
+  // mudec and fondazioneprada — dropped 2026-11-28: both block this scraper.
+  // mudec.it puts every page, robots.txt included, behind a Cloudflare
+  // challenge for our bot; fondazioneprada.org serves its home page but answers
+  // its /project/ pages with "Sorry, you have been blocked". Both produced 0
+  // events. Getting past that means pretending to be a browser, which we
+  // decided against (see USER_AGENT in scrapeEvents.ts). arte.it lists both
+  // venues' shows. To bring them back, ask each press office to allow-list
+  // ArtBeatBot, then restore the entries from git history.
   //
   // milanotoday — dropped deliberately. It supplied 1 of 36 rows, and its
   // robots.txt opens with a copyright notice prohibiting scraping "for any

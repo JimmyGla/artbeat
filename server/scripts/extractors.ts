@@ -113,3 +113,19 @@ export function isUsefulDescription(desc: string, title: string): boolean {
   if (dn.startsWith(tn.slice(0, Math.min(40, tn.length)))) return false
   return true
 }
+
+/**
+ * Flatten a multi-line heading into one title.
+ *
+ * Venue sites set a show's name and subtitle on two lines of one <h1>
+ * ("Costantino Nivola\nScolpire il vento"). Collapsing the break to a space
+ * runs them together; aggregators write them as "Name. Subtitle", and matching
+ * that keeps the venue's row and arte.it's row recognisably the same show.
+ */
+export function joinTitleLines(raw: string): string {
+  return raw
+    .split(/\s*\n+\s*/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .reduce((acc, line) => (!acc ? line : /[.:!?]$/.test(acc) ? `${acc} ${line}` : `${acc}. ${line}`), '')
+}

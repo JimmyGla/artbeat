@@ -7,10 +7,10 @@ import { PrismaClient, VenueType } from '@prisma/client'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
 import * as fs from 'fs'
-import { parseDate, parseDateRange } from './dateParser'
+import { parseDate, parseDateRange, parseUntil } from './dateParser'
 import { resolveVenue, inferVenueKind, parseLabelledVenue, ResolvedVenue } from './venues'
 import { geocodeVenue } from './geocode'
-import { parsePrice, matchFormat, looksFree, isValidEventTitle, isUsefulDescription, splitListingTitle } from './extractors'
+import { parsePrice, matchFormat, looksFree, isValidEventTitle, isUsefulDescription, splitListingTitle, joinTitleLines } from './extractors'
 import { matchArtForms } from './artFormMatcher'
 import { SOURCES, type SourceDetailHints } from './sources'
 
@@ -39,7 +39,8 @@ const MILAN_LNG = 9.1859
 interface ScrapedEvent {
   title: string
   description: string
-  startDate: Date
+  /** Undefined when the source gives only a closing date ("Fino al …"). */
+  startDate?: Date
   endDate?: Date
   price?: number
   /** A source explicitly said free — not merely "no price found". */
@@ -172,13 +173,19 @@ async function extractBodyParagraph(page: Page): Promise<string> {
 /**
  * First non-empty text among a source's selectors. Returns '' when none match,
  * so callers can fall through to the generic extractors.
+ *
+ * Reads innerText, not textContent: a <br> in a heading is a line break to a
+ * reader, but textContent drops it and glues "Nivola" to "Scolpire". With
+ * `keepLines` the breaks survive for the caller to join; otherwise all
+ * whitespace collapses to single spaces.
  */
-async function firstMatch(page: Page, selectors?: string[]): Promise<string> {
+async function firstMatch(page: Page, selectors?: string[], keepLines = false): Promise<string> {
   if (!selectors?.length) return ''
   for (const sel of selectors) {
-    const text = await page
-      .$eval(sel, (el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim())
+    const raw = await page
+      .$eval(sel, (el) => (el as HTMLElement).innerText || el.textContent || '')
       .catch(() => '')
+    const text = keepLines ? raw.trim() : raw.replace(/\s+/g, ' ').trim()
     if (text) return text
   }
   return ''
@@ -201,7 +208,7 @@ async function scrapeDetailPage(
     // Per-source selectors first; JSON-LD and og: tags are the fallback, not
     // the other way round, because a site that needs hints needs them to win.
     const rawTitle =
-      (await firstMatch(page, hints?.title)) ||
+      joinTitleLines(await firstMatch(page, hints?.title, true)) ||
       (jsonLd?.['name'] as string) || meta.ogTitle ||
       await page.$eval('h1, .title, article h1', el => el.textContent?.trim() ?? '').catch(() => '')
     // arte.it's og:title carries " - Mostra - <city> - <venue> - Arte.it".
@@ -248,8 +255,14 @@ async function scrapeDetailPage(
         startDate = startDate ?? range.start
         endDate   = endDate   ?? range.end
       }
+      // "Fino al 14 febbraio 2027": a show already on, listed by its closing
+      // date only. Keep the end and leave the start unknown rather than
+      // guessing it. Read from the hinted element only — page bodies carry
+      // promo banners in the same words ("fino al 30 novembre, 20% off").
+      if (!startDate && !endDate) endDate = parseUntil(hintedDates)
     }
-    if (!startDate) return null
+    // No date at all: a permanent collection page or not a show. Skip it.
+    if (!startDate && !endDate) return null
 
     // Price. `isFree` is tracked separately from a missing price so that
     // "we found no number" never masquerades as free admission.
@@ -314,7 +327,7 @@ async function scrapeDetailPage(
 }
 
 // ─── Generic Scraper ─────────────────────────────────────────────────────────
-async function scrapeGeneric(
+export async function scrapeGeneric(
   page: Page,
   listingUrl: string,
   linkRegex: RegExp,
@@ -507,7 +520,7 @@ async function upsertEvent(
     // rather than crawled.
     const dates = {
       run:      'TEMPORARY' as const,
-      startsOn: toCalendarDay(scraped.startDate),
+      startsOn: scraped.startDate ? toCalendarDay(scraped.startDate) : null,
       endsOn:   scraped.endDate ? toCalendarDay(scraped.endDate) : null,
     }
 
@@ -522,14 +535,25 @@ async function upsertEvent(
 
     // Identity: the source URL, which is stable. Matching on title + day
     // inserted a duplicate whenever a source reworded a heading.
-    const existing = scraped.ticketUrl
-      ? await prisma.exhibition.findFirst({ where: { sourceUrl: scraped.ticketUrl } })
-        ?? await prisma.exhibition.findFirst({
-             where: { title: { equals: scraped.title, mode: 'insensitive' }, startsOn: dates.startsOn },
-           })
-      : await prisma.exhibition.findFirst({
-          where: { title: { equals: scraped.title, mode: 'insensitive' }, startsOn: dates.startsOn },
+    //
+    // The title fallback is for this source moving a page, so it only matches
+    // this source's own rows. Matching another source's row made arte.it take
+    // over the venue's own row each night (rewriting its URL), after which the
+    // venue's scrape could not find it and inserted it again — for reconcile
+    // to merge, and the cycle to repeat. Cross-source duplicates are
+    // reconcile's job. Without a start date there is no safe fallback key.
+    const byTitle = () => dates.startsOn
+      ? prisma.exhibition.findFirst({
+          where: {
+            title:      { equals: scraped.title, mode: 'insensitive' },
+            startsOn:   dates.startsOn,
+            sourceName: scraped.source,
+          },
         })
+      : Promise.resolve(null)
+    const existing = scraped.ticketUrl
+      ? await prisma.exhibition.findFirst({ where: { sourceUrl: scraped.ticketUrl } }) ?? await byTitle()
+      : await byTitle()
 
     const now = new Date()
 
@@ -544,8 +568,9 @@ async function upsertEvent(
           title:      scraped.title,
           format,
           run:        dates.run,
-          startsOn:   dates.startsOn,
           lastSeenAt: now,
+          // A run with only a closing date must not erase a known start.
+          ...(dates.startsOn      ? { startsOn:    dates.startsOn    } : {}),
           ...(dates.endsOn        ? { endsOn:      dates.endsOn      } : {}),
           ...(scraped.description ? { description: scraped.description } : {}),
           ...(scraped.imageUrl    ? { imageUrl:    scraped.imageUrl    } : {}),
@@ -626,7 +651,7 @@ async function main() {
   const uniqueEvents = allScraped.filter(e => {
     const key = e.ticketUrl
       ? `url:${e.ticketUrl}`
-      : `t:${e.title.toLowerCase().trim()}|${e.startDate.toISOString().slice(0, 10)}`
+      : `t:${e.title.toLowerCase().trim()}|${e.startDate?.toISOString().slice(0, 10) ?? ''}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -693,7 +718,9 @@ async function main() {
   console.log('─────────────────────────────────────────')
 }
 
-main()
+// Run only when executed, so a harness can import scrapeGeneric and try one
+// source against the live site without touching the database.
+if (require.main === module) main()
   .catch(err => {
     console.error('Fatal error:', err)
     // Exit non-zero: this previously logged and exited 0, so a cron job or CI
