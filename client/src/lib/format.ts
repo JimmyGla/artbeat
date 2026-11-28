@@ -33,6 +33,18 @@ export function admissionLabel(admission: Admission, priceCents: number | null):
   return 'Price not listed'
 }
 
+/**
+ * What the call-to-action says when a show has no ticket link. Only free
+ * entry may promise "just show up": a missing link says nothing about the
+ * price, and calling a paid show free sends people to a till they didn't
+ * expect.
+ */
+export function noTicketLinkNote(admission: Admission): string {
+  if (admission === 'FREE') return 'Free entry — just show up'
+  if (admission === 'PAID') return 'Paid entry — check with the venue'
+  return 'Entry not listed — check with the venue'
+}
+
 /** True when the admission line is a statement of ignorance, not a price. */
 export function admissionIsUnknown(admission: Admission): boolean {
   return admission === 'UNKNOWN'
