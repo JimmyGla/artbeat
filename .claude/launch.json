@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "client-prod-api",
+      "runtimeExecutable": "npm.cmd",
+      "runtimeArgs": ["--prefix", "client", "run", "dev", "--", "--mode", "prodapi", "--port", "5173", "--strictPort"],
+      "port": 5173
+    }
+  ]
+}
