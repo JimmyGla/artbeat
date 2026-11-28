@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseDate, parseDateRange } from '../dateParser'
+import { parseDate, parseDateRange, parseUntil } from '../dateParser'
 
 /**
  * Dates decide whether an event is shown at all: the `stillOn` filter hides
@@ -79,5 +79,41 @@ describe('parseDateRange', () => {
   it('returns undefined when there is no date at all', () => {
     expect(parseDateRange('nessuna data qui')).toBeUndefined()
     expect(parseDateRange('')).toBeUndefined()
+  })
+})
+
+describe('Triennale date lines', () => {
+  it('parses a range where each date has its own year', () => {
+    expect(parseDateRange('11 dicembre 2026 – 21 marzo 2027')).toEqual({
+      start: new Date(Date.UTC(2026, 11, 11)),
+      end:   new Date(Date.UTC(2027, 2, 21)),
+    })
+  })
+
+  it('reads the closing date from "Fino al"', () => {
+    expect(parseUntil('Fino al 14 febbraio 2027')).toEqual(new Date(Date.UTC(2027, 1, 14)))
+  })
+
+  it('returns nothing without a "Fino al" date', () => {
+    expect(parseUntil('11 dicembre 2026 – 21 marzo 2027')).toBeUndefined()
+    expect(parseUntil('Fino al 30 novembre acquista una membership')).toBeUndefined()
+    expect(parseUntil(undefined)).toBeUndefined()
+  })
+})
+
+describe('parseDate fallback', () => {
+  // new Date() read "Fino al 7 marzo 2027" as 7 March, local time, a day early.
+  it('does not guess a date from free text', () => {
+    expect(parseDate('Fino al 7 marzo 2027')).toBeUndefined()
+    expect(parseDate('Fino al 29 novembre 2026')).toBeUndefined()
+    expect(parseDateRange('Fino al 7 marzo 2027')).toBeUndefined()
+    expect(parseDate('Photo Grant Deloitte 2026')).toBeUndefined()
+  })
+
+  it('still reads JSON-LD dates', () => {
+    expect(parseDate('2026-11-11')?.toISOString()).toBe('2026-11-11T00:00:00.000Z')
+    expect(parseDate('2026-11-11T18:00:00+01:00')?.toISOString()).toBe('2026-11-11T17:00:00.000Z')
+    expect(parseDate('2026-11-11T17:00:00Z')?.toISOString()).toBe('2026-11-11T17:00:00.000Z')
+    expect(parseDate('Wed, 11 Nov 2026 17:00:00 GMT')?.toISOString()).toBe('2026-11-11T17:00:00.000Z')
   })
 })

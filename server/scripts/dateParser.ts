@@ -118,6 +118,18 @@ const SEP = String.raw`(?:\s*[–—\/]\s*|\s+al\s+)`
 const MON = String.raw`([a-zà-ù]+)` // captured month word
 
 const RANGE_PATTERNS: RangePattern[] = [
+  // "11 dicembre 2026 – 21 marzo 2027"  (each side has its own year; Triennale)
+  {
+    re: new RegExp(
+      String.raw`(\d{1,2})\s+${MON}\s+(\d{4})${SEP}(\d{1,2})\s+${MON}\s+(\d{4})`,
+      'i',
+    ),
+    parse: ([, d1, m1, y1, d2, m2, y2]) => {
+      const start = makeDate(+y1, monthIndex(m1) ?? -1, +d1)
+      const end   = makeDate(+y2, monthIndex(m2) ?? -1, +d2)
+      return start && end ? { start, end } : undefined
+    },
+  },
   // "dal 10 marzo [2025] al 15 giugno 2025"
   {
     re: new RegExp(
@@ -161,6 +173,9 @@ const RANGE_PATTERNS: RangePattern[] = [
   },
 ]
 
+/** "2026-11-11", "2026-11-11T18:00:00+01:00", or RFC 2822 "Wed, 11 Nov 2026 …". */
+const ISO_OR_RFC = /^(?:\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?|(?:[A-Z][a-z]{2},\s*)?\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4}(?:\s+[\d:]+(?:\s+(?:GMT|UTC|[+-]\d{4}))?)?)$/
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -187,7 +202,13 @@ export function parseDate(raw: string | undefined | null): Date | undefined {
     }
   }
 
-  // 2 — ISO 8601 / RFC 2822 fallback (covers JSON-LD dates)
+  // 2 — ISO 8601 / RFC 2822 fallback (covers JSON-LD dates).
+  //
+  // Only for strings shaped like one. `new Date()` on free text is lenient: it
+  // reads "Fino al 7 marzo 2027" as 7 March ("marzo" → "Mar", "novembre" →
+  // "Nov") in local time — so a closing date came back as a start date, a day
+  // early. "gennaio" has no English prefix, which is why it only hit some months.
+  if (!ISO_OR_RFC.test(s)) return undefined
   const iso = new Date(s)
   if (!isNaN(iso.getTime())) return iso
 
@@ -220,3 +241,19 @@ export function parseDateRange(raw: string | undefined | null): DateRange | unde
   const start = parseDate(s)
   return start ? { start } : undefined
 }
+
+/**
+ * The closing date in "Fino al 14 febbraio 2027".
+ *
+ * Some venues list a show that is already on by its closing date alone. That
+ * says when it ends and nothing about when it began, so this returns the end
+ * only; the caller must not invent a start. Only use it on a date element, never
+ * on a whole page: "fino al 30 novembre" is just as likely to be a promo banner.
+ */
+export function parseUntil(raw: string | undefined | null): Date | undefined {
+  if (!raw) return undefined
+  const m = raw.match(/\bfino\s+al\s+(\d{1,2})\s+([a-zà-ù]+)\s+(\d{4})\b/i)
+  if (!m) return undefined
+  const mi = monthIndex(m[2])
+  return mi !== undefined ? makeDate(+m[3], mi, +m[1]) : undefined
+}
