@@ -8,7 +8,7 @@ import StatusBarScrim from '../components/StatusBarScrim'
 import SaveButton from '../components/SaveButton'
 import {
   admissionLabel, dateLabel, closingLabel,
-  venueKindLabel, accentColor, formatLabel,
+  venueKindLabel, accentColor, formatLabel, noTicketLinkNote,
   type Admission, type RunKind,
 } from '../lib/format'
 import { useCity } from '../context/CityContext'
@@ -357,12 +357,18 @@ export default function ExhibitionDetailPage() {
                 </svg>
                 Get tickets
               </a>
-            ) : (
+            ) : exhibition.admission === 'FREE' ? (
               <div className="flex-1 h-12 flex items-center justify-center gap-2 bg-emerald-600 text-white font-semibold rounded-xl text-sm">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                Free entry — just show up
+                {noTicketLinkNote(exhibition.admission)}
+              </div>
+            ) : (
+              // No ticket link is not free entry: say so plainly, without the
+              // green "go" styling.
+              <div className="flex-1 h-12 flex items-center justify-center px-3 bg-gray-100 text-gray-600 font-medium rounded-xl text-sm text-center">
+                {noTicketLinkNote(exhibition.admission)}
               </div>
             )}
           </div>
